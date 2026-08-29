@@ -110,3 +110,30 @@ evaluator/local_evaluator.py      public-set simulator and scorer
 
 The catalog and sessions are derived from Amazon Reviews 2023 by McAuley Lab, UCSD. See `DATA_ATTRIBUTION.md` before using or redistributing the data.
 Sessions are sampled deterministically from the official Clothing 5-core leave-last-out split and joined to the frozen catalog.
+
+---
+
+## Our Agent: Shopping Copilot
+
+An offline, deterministic agent built on the Python standard library — no LLM,
+no embedding model, no network call on the turn path.
+
+| | HR@10 | MRR | MTTC | TechnicalScore |
+|---|---|---|---|---|
+| Weak BM25 baseline | 0.125 | 0.0680 | 9.81 | 0.1067 |
+| Shopping Copilot (defaults) | 0.885 | 0.5535 | 3.23 | 0.7641 |
+| Shopping Copilot (tuned) | 0.910 | 0.5648 | 2.98 | 0.7848 |
+
+The tuned row is fitted on half of this set; the unbiased held-out estimate is
+0.7869. See `docs/report.md` §8.
+
+- **Method report:** `docs/report.md` (architecture, ablations, limitations, cost disclosure)
+- **Implementation:** `shopping_copilot/` — one module per component
+- **Entry point:** `starter/agent.py` (the harness imports `Agent` from here)
+
+```bash
+python -m evaluator.local_evaluator       # score on the public set
+python -m unittest discover -s tests      # 29 tests
+python -m tools.demo --sample public_0002 # one multi-turn transcript
+python -m tools.ablate                    # per-component ablation table
+```
