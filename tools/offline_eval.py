@@ -113,17 +113,26 @@ class ReplayScorer:
     """
 
     def __init__(self, config: Config) -> None:
-        self.model = LinearModel(
-            build_linear_weights(config.ranking, config.priors, config.constraints)
-        )
+        base = build_linear_weights(config.ranking, config.priors, config.constraints)
+        self.model = LinearModel(base)
+        # Mirrors `Ranker.intent_models`: a per-intent fusion weight, so a replay
+        # of an intent-conditional config ranks the way the live agent does.
+        self.intent_models: dict[str, LinearModel] = {}
+        for intent in ("buying", "browsing", "uncertain"):
+            override = getattr(config.ranking, f"w_fused_{intent}", None)
+            if override is None or override == config.ranking.w_fused:
+                continue
+            weights = dict(base)
+            weights["fused"] = override
+            self.intent_models[intent] = LinearModel(weights)
         self.penalties = {
             dimension: getattr(config.constraints, f"{dimension}_unknown")
             for dimension in DIMENSIONS
         }
         self.penalties = {d: p for d, p in self.penalties.items() if p}
 
-    def __call__(self, vector: list[float]) -> float:
-        score = self.model.score(vector)
+    def __call__(self, vector: list[float], intent: str | None = None) -> float:
+        score = self.intent_models.get(intent, self.model).score(vector)
         for dimension, penalty in self.penalties.items():
             satisfied = vector[FEATURE_INDEX[f"{dimension}_satisfied"]]
             violated = vector[FEATURE_INDEX[f"{dimension}_violated"]]
@@ -134,7 +143,10 @@ class ReplayScorer:
 
 def rank_turn(rows: list[dict], score_fn) -> list[str]:
     """Full ordered pool for one turn. Ties break on parent_asin, as live."""
-    scored = [(score_fn(row["features"]), row["candidate_asin"]) for row in rows]
+    scored = [
+        (score_fn(row["features"], row.get("intent")), row["candidate_asin"])
+        for row in rows
+    ]
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [asin for _, asin in scored]
 

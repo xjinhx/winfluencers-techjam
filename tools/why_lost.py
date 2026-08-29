@@ -41,7 +41,7 @@ from tools.offline_eval import (
 )
 
 
-def gap_rows(groups, joined, scorer, weights, ranks, max_winners):
+def gap_rows(groups, joined, scorer, weights, ranks, max_winners, config_ranking):
     """One record per (session, winning candidate) pair in the rank band."""
     replay = offline_metrics(groups, joined, scorer)
     by_sample = {label["sample_id"]: (sid, label) for sid, label in joined.items()}
@@ -62,6 +62,12 @@ def gap_rows(groups, joined, scorer, weights, ranks, max_winners):
         vectors = {r["candidate_asin"]: r["features"] for r in rows}
         ordered = rank_turn(rows, scorer)[:TOP_K]
 
+        turn_intent = rows[0].get("intent")
+        turn_weights = dict(weights)
+        override = getattr(config_ranking, f"w_fused_{turn_intent}", None)
+        if override is not None:
+            turn_weights["fused"] = override
+
         target = label["target"]
         target_vec = vectors[target]
         winners = ordered[: ordered.index(target)][:max_winners]
@@ -69,7 +75,7 @@ def gap_rows(groups, joined, scorer, weights, ranks, max_winners):
         for winner in winners:
             win_vec = vectors[winner]
             contributions = {
-                name: (win_vec[i] - target_vec[i]) * weights.get(name, 0.0)
+                name: (win_vec[i] - target_vec[i]) * turn_weights.get(name, 0.0)
                 for i, name in enumerate(FEATURE_NAMES)
             }
             records.append({
@@ -78,7 +84,7 @@ def gap_rows(groups, joined, scorer, weights, ranks, max_winners):
                 "difficulty_bucket": session["difficulty_bucket"],
                 "best_rank": session["best_rank"],
                 "winner": winner,
-                "score_gap": scorer(win_vec) - scorer(target_vec),
+                "score_gap": scorer(win_vec, turn_intent) - scorer(target_vec, turn_intent),
                 "contributions": contributions,
                 "raw_delta": {
                     name: win_vec[i] - target_vec[i]
@@ -161,7 +167,7 @@ def main() -> None:
     joined = join_by_order(order, labels)
     scorer = ReplayScorer(config)
 
-    selected, records = gap_rows(groups, joined, scorer, weights, ranks, args.max_winners)
+    selected, records = gap_rows(groups, joined, scorer, weights, ranks, args.max_winners, config.ranking)
     print(f"sessions at ranks {sorted(ranks)}: {len(selected)}")
     if not records:
         print("no comparable pairs found")
