@@ -18,6 +18,7 @@ from shopping_copilot.clarify import ALLOWED_ATTRIBUTES
 from shopping_copilot.config import Config
 from shopping_copilot.features import FEATURE_NAMES, extract
 from shopping_copilot.profile import ShopperProfile
+from shopping_copilot.ranking import LinearModel, Ranker
 from shopping_copilot.state import ShoppingState, parse_utterance
 from shopping_copilot.structured import (
     SATISFIED,
@@ -315,6 +316,61 @@ class ContractTests(unittest.TestCase):
         response = self.agent.respond("t2", "I'm looking for Shorts, but I'm still exploring.", 1, 10)
         if response["ask_attribute"] is not None:
             self.assertTrue(response["recommendations"])
+
+
+class IntentFusionTests(unittest.TestCase):
+    """Per-intent fusion weight (see CLAUDE.md).
+
+    `fused` double-counts the lexical and dense signals already in the vector,
+    which drowns the structured features on constraint-bearing turns but is the
+    best evidence available on browsing turns.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.catalog = build_catalog(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _ctx(self, intent):
+        from shopping_copilot.features import ScoringContext
+
+        return ScoringContext(
+            catalog=self.catalog,
+            constraints=Constraints(),
+            profile=ShopperProfile.parse({}),
+            fused={self.catalog.get("B000000001").idx: 1.0},
+            per_field={}, dense={},
+            query_terms=set(), query_bigrams=set(), category_terms=set(),
+            intent=intent,
+        )
+
+    def test_absent_overrides_leave_the_default_path_untouched(self):
+        config = Config()
+        ranker = Ranker(config.ranking, config.priors, config.constraints)
+        self.assertEqual(ranker.intent_models, {})
+
+    def test_override_applies_only_to_its_own_intent(self):
+        config = Config()
+        config.ranking.w_fused_buying = 0.0
+        ranker = Ranker(config.ranking, config.priors, config.constraints)
+        product = self.catalog.get("B000000001")
+
+        buying, _ = ranker.score_candidate(product, self._ctx("buying"))
+        browsing, _ = ranker.score_candidate(product, self._ctx("browsing"))
+        # Browsing keeps the full fused contribution; buying drops it.
+        self.assertAlmostEqual(browsing - buying, config.ranking.w_fused, places=6)
+
+    def test_a_supplied_model_is_never_rewritten(self):
+        # The GBDT seam keeps control of its own vector.
+        config = Config()
+        config.ranking.w_fused_buying = 0.0
+        ranker = Ranker(
+            config.ranking, config.priors, config.constraints,
+            model=LinearModel({"fused": 1.0}),
+        )
+        self.assertEqual(ranker.intent_models, {})
 
 
 if __name__ == "__main__":

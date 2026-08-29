@@ -22,3 +22,7 @@ tests/test_organizer_pipeline.py
 results*.json
 .cache/
 tuning.log
+
+# Internal diagnostic working documents (findings summarised in CLAUDE.md).
+PRD_rank_diagnostic.md
+docs/rank_diagnostic.md

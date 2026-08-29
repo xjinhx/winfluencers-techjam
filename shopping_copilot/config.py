@@ -106,6 +106,20 @@ class RankingConfig:
     """Reranker weights (architecture doc S4b) plus diversity (S6)."""
 
     w_fused: float = 1.000
+
+    # Fusion weight per routed intent; `None` falls back to `w_fused`.
+    #
+    # `fused` is a convex combination of the same lexical and dense signals that
+    # also enter the vector separately, so it counts text evidence twice. On
+    # constraint-bearing turns that double count drowns the structured features:
+    # across the rank 3-5 band it carries 68% of the score gap while every
+    # constraint feature carries 0.0 (see CLAUDE.md). A browsing turn
+    # has no disclosed constraints to drown and `fused` is the best evidence
+    # available there, which is why this is conditional rather than a global cut.
+    w_fused_buying: float | None = None
+    w_fused_browsing: float | None = None
+    w_fused_uncertain: float | None = None
+
     w_bm25_title: float = 0.260
     w_bm25_features: float = 0.300
     w_bm25_categories: float = 0.220

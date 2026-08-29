@@ -108,6 +108,18 @@ class Ranker:
         self.model = model or LinearModel(
             build_linear_weights(ranking, priors, constraints)
         )
+        # One model per routed intent, built only when the caller did not supply
+        # its own scorer -- a GBDT dropped into `model` keeps full control of the
+        # vector rather than having `fused` rewritten underneath it.
+        self.intent_models: dict[str, ScoringModel] = {}
+        if model is None:
+            for intent in ("buying", "browsing", "uncertain"):
+                override = getattr(ranking, f"w_fused_{intent}", None)
+                if override is None or override == ranking.w_fused:
+                    continue
+                weights = build_linear_weights(ranking, priors, constraints)
+                weights["fused"] = override
+                self.intent_models[intent] = LinearModel(weights)
         self._unknown_penalty = {
             dimension: getattr(constraints, f"{dimension}_unknown")
             for dimension in ("gender", "brand", "category", "price", "material", "color")
@@ -115,7 +127,7 @@ class Ranker:
 
     def score_candidate(self, product: Product, ctx: ScoringContext) -> tuple[float, list[float]]:
         vector = extract(product, ctx)
-        score = self.model.score(vector)
+        score = self.intent_models.get(ctx.intent, self.model).score(vector)
         # 'unknown' is neither column set. Priced here so the feature vector
         # stays a clean one-hot-minus-one for a future tree model.
         for dimension, penalty in self._unknown_penalty.items():
