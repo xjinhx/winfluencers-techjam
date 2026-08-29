@@ -1,0 +1,8 @@
+# The agent runs on the Python standard library alone.
+#
+# This is deliberate, not an oversight. Submission rules state that organizer
+# policy may disable network access for official final scoring, so the system
+# has no third-party dependency, no model download, and no service call on the
+# turn path. `pip install -r requirements.txt` is a no-op by design.
+#
+# Requires Python 3.10 or later (PEP 604 unions, dataclass slots).
