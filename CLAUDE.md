@@ -84,12 +84,23 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.903604`** — measured 2026-08-31 on `d2f12ac`
-by running the committed `config/tuned.json` (now `per_field_depth: 1000`)
-through the unmodified evaluator on all 200 public sessions. Up from
-**0.900004** — see "What was found" for the `per_field_depth` 800→1000 entry.
-Reproduced across the CLI evaluator, `tools.evalkit.Bench`, and offline replay;
-all three agree exactly.
+**Live score: `TechnicalScore = 0.908578`, HR@10 = 1.000 — every public
+session hits.** Measured 2026-08-31 on the `mega-fix` working tree (`46a6294`
+plus the conjunctive-injection change, uncommitted at time of writing) by
+running the committed `config/tuned.json` through the unmodified CLI
+evaluator on all 200 public sessions. The injection is **always-on in code**
+(no config flag — see the top "What was found" entry), so the committed
+config produces this number as-is. Up from **0.903753** (this tree with the
+old code) / **0.903604** (`d2f12ac`, the last committed-trunk measurement).
+Gates: `tools.evalkit.Bench` reproduces it exactly; `tools.offline_eval`
+against a fresh trace agrees on **200/200** session `best_rank`s;
+`target_never_in_pool` **1 → 0**; 49/49 tests pass.
+
+**Tree note (2026-08-31):** `mega-fix` at `46a6294` (the arwen and
+maximising-101 merges) re-measured the committed config at **0.903753**
+before the injection work — +0.000149 of drift from those merges that no
+document had recorded, noise-level but written down per this file's own rule.
+The test suite is 49, not the 38 recorded for trunk.
 
 **0.900004 is one step further back, not the live number — read it as "trunk
 before this session's depth change."** It is the merged-trunk figure this same
@@ -120,31 +131,36 @@ the re-measurement that note itself called for should new evidence appear.**
 
 | metric | value |
 |---|---|
-| HR@10 | 0.995 (1 miss: `public_0137`) |
-| MRR | 0.748345 |
-| MTTC | 1.92 |
-| Efficiency | 0.908 |
-| **TechnicalScore** | **0.903604** |
+| HR@10 | **1.000** (0 misses) |
+| MRR | 0.753595 |
+| MTTC | 1.875 |
+| Efficiency | 0.9125 |
+| **TechnicalScore** | **0.908578** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7945 | 1.3125 |
-| browsing | 80 | 0.9875 | 0.6708 | 1.85 |
-| intent_override | 30 | 1.0000 | 0.8833 | 3.70 |
+| buying | 80 | 1.0000 | 0.7961 | 1.3125 |
+| browsing | 80 | 1.0000 | 0.6833 | 1.7375 |
+| intent_override | 30 | 1.0000 | 0.8806 | 3.70 |
 | boundary | 10 | 1.0000 | 0.5950 | 2.00 |
 
-Rank distribution of the 199 hits (recomputed via `tools.offline_eval`'s own
-`ReplayScorer`, cross-checked against the CLI evaluator's aggregate HR@10/MRR —
-exact match): **124 at rank 1**, 31 at rank 2, 34 at ranks 3-5, 10 at ranks
-6-10. The rank-2 bucket is still the largest single block below the top —
-unchanged by this fix, since depth only affects sessions that weren't in the
-pool at all.
+Rank distribution of the 200 hits (from the gated `out_injection` run's
+per-session `best_rank`, cross-checked against the CLI aggregate — exact
+match): **125 at rank 1**, 31 at rank 2, 35 at ranks 3-5, 9 at ranks 6-10.
+With HR@10 saturated, **all remaining headroom is MRR (75 sessions below
+rank 1, up to +0.0739) and efficiency (up to +0.0175, floored by
+intent_override's structural inability to hit before turn 3-4)**. The rank-2
+bucket remains the largest single block below the top and remains gated on
+new feature information, not reweighting — see "Remaining headroom".
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
 `w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
+- **0.903604 and 0.903753** are the pre-injection figures — `d2f12ac` and the
+  `46a6294` working tree respectively, both honest, both superseded
+  2026-08-31 by 0.908578 when the conjunctive injection became always-on.
 - **0.900004** was the merged-trunk figure *before* this session's
   `per_field_depth` 800→1000 change. It is a correct, honest measurement of
   `d2f12ac` at that config — kept as the reference point the depth change is
@@ -297,6 +313,119 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**ADOPTED, always-on: conjunctive exact-substring injection. 0.903753 →
+0.908578, HR@10 1.000 — every public session hits (2026-08-31, per He
+Jinhong: "code out both option A and B and see which one increases the
+technical score", then "keep option B in the codebase", then "make it
+default on permanently, integrate it into the code as a permanent fix").**
+
+The mechanism: a product whose `search_blob` contains **every live
+constraint span verbatim** enters the candidate pool regardless of BM25 rank
+— the route into the pool that `per_field_depth` (measured flat past 1000)
+cannot provide. Full design, feasibility scans, and per-criterion results
+live in `PRD_conjunctive_injection.md`; this entry records the decision and
+what must not be re-derived.
+
+**What's in the code** (`config.py`, `agent.py`): two `RetrievalConfig`
+fields — `injection_min_spans: 2`, `injection_max_survivors: 200` — plus a
+survivor-scan cache keyed by the `active_spans()` tuple (~0.2s/scan, +28s on
+a full 200-session pass). **The injection is unconditional — there is no
+enable flag — and only the additive strategy exists.** The two gates are the
+mechanism's selectivity, not an off-switch: below `min_spans` a single
+boilerplate span matches a fifth of the catalog (10,918 survivors for
+"polyester" alone), and an insufficiently-selective conjunction is skipped
+outright that turn rather than truncated. The scaffolding history, so nobody
+reconstructs it: both strategies were first built behind a mode switch for
+the head-to-head below; prepend was then deleted (per He Jinhong: "get rid of
+option A entirely. the purpose of the experiment is to delete the useless one
+and keep the other") and the switch collapsed to a default-off boolean,
+re-verified byte-identical (off = 0.903753, on = 0.908578); the boolean was
+then deleted too (per He Jinhong: "make it default on permanently") — each
+step re-verified, 49/49 tests at every stage.
+Two latent integration bugs were caught **before** any scored run, either of
+which would have silently invalidated the experiment: `agent.py`'s
+`ctx.fused` construction had no `if i in fused` guard (KeyError on exactly
+the candidates injection exists to add), and the `rerank_depth` slice would
+have discarded tail-appended survivors entirely — the same
+`candidate_depth`/`rerank_depth` coupling trap recorded on 2026-08-31,
+recurring. A naive append would have scored **byte-identical to the
+incumbent** and read as "mechanism doesn't help" when it never ran.
+
+**The head-to-head, on `mega-fix` `46a6294` (uncommitted working tree),
+seed-7 folds, scratch configs throughout:**
+
+| | full 200 | HR@10 | MRR | MTTC | fold A | fold B |
+|---|---|---|---|---|---|---|
+| incumbent (off) | 0.903753 | 0.995 | 0.748845 | 1.920 | 0.893257 | 0.914250 |
+| A: prepend, slice to 200 | 0.899903 | 0.990 | 0.747345 | 1.965 | 0.885357 | 0.914450 |
+| **B: keep 200, rerank all** | **0.908578** | **1.000** | **0.753595** | **1.875** | **0.902707** | **0.914450** |
+
+**Option A (prepend survivors, let `rerank_depth` cut the fused tail) is
+rejected on evidence, not preference.** It converts `public_0137` (the one
+remaining miss) but destroys two sessions doing it: `public_0126` **rank 1 →
+miss** and `public_0161` **rank 4 → miss**. The mechanism is displacement:
+the gate admits conjunctions up to 200 survivors, and one like
+`"buckle closure imported"` (172 survivors) leaves only 28 slots for the
+fused pool — mid-pool targets fall out entirely. The median case ("20
+injected + 180 original") is harmless; the tail case is not, and the tail
+case occurred twice in 200 public sessions.
+
+**Option B (keep the full fused slice, append survivors, rerank 200+N) wins
+cleanly.** `public_0137` converts at **rank 1** — `span_all` plus the
+title/coverage penalties lift it immediately once it is visible, the same
+pattern `public_0092` showed at the depth change. HR@10 **0.995 → 1.000,
+every public session hits.** MRR *rose* — no dilution, the failure mode that
+killed the category union did not appear, because nothing is displaced and
+survivors are few. Only collateral in 200 sessions: `public_0146` rank 4 → 5.
+The gate audit (PRD acceptance criterion 4): of 136 distinct span tuples in
+the full run, **89 fired** (≤200 survivors), **34 correctly skipped** (e.g.
+`"cotton imported"`, 4,348), **13 empty**. It gates; it is not inert.
+
+**Honesty:** full-set +0.004825 is well under single-run SE (~0.029) —
+unverified by this set's noise floor. Fold B is +0.0002, a tie, and that is
+the *correct* reading rather than a warning: the one public miss sits in
+fold A under the seed-7 split, so fold B measures only collateral damage on
+100 sessions that needed no help — and measures zero (MRR byte-identical at
+0.7695). The structural case carries the result: a targeted defect converted
+at rank 1, no held-out damage, no fitted parameters, an audited gate. Also
+note the PRD's original feasibility claim was corrected during this work: "≥2
+spans collapses survivors to single digits" is only true at 4 spans — at
+exactly 2 it runs 300-1,000+, which is why `injection_max_survivors` does
+real work rather than guarding a corner case.
+
+**Status: ADOPTED and live — the injection is unconditional in code, so the
+committed `config/tuned.json` produces 0.908578 with no config change.** All
+adoption gates passed the same day: unmodified CLI evaluator reproduces
+**0.908578** exactly (HR@10 1.000, MRR 0.753595, MTTC 1.875);
+`tools.offline_eval` against a fresh 76,701-row trace agrees on **200/200**
+session `best_rank`s; `target_never_in_pool` **1 → 0** — for the first time,
+every public target reaches the candidate pool; 49/49 tests. Scenario
+movement vs 0.903604: browsing HR@10 0.9875 → 1.0000 and MTTC 1.85 → 1.7375
+(the converted miss was browsing), everything else within noise.
+`results.json` untouched throughout; every run went to scratch paths per
+Critical rule 1. Note for tuning work: because the mechanism has no enable
+flag, the incumbent-without-injection is no longer reachable by config — an
+ablation of it requires reverting the `agent.py` block, which is deliberate
+per the "permanent fix" instruction quoted above.
+
+**Fresh `why_lost` against the adopted build's trace (same day), because the
+old diagnostics predate span_all, title/coverage, and the injection:** at
+rank 2 (31 sessions) and ranks 3-10 (44 sessions), **every constraint and
+span column carries exactly 0.0% of the score gap — `span_all` never once
+separates target from winner.** In all 119 (session, winner) pairs the
+winner *also* matches every disclosed span; the customer's constraints no
+longer distinguish anything the pool hasn't already satisfied. The entire
+gap is text-evidence volume: rank 2 splits bm25_features 28% / bm25_title
+22% / popularity 19% / dense 19%, ranks 3-10 split bm25_features 37% /
+fused 34% / bm25_title 18%. The winners are listings that repeat the query
+words more densely than the target — the same keyword-density bias the
+category-union diagnosis named. **Implication: the remaining 75 sub-rank-1
+sessions need evidence that discriminates *within* the set of
+full-conjunction matches** (e.g. which field the span matches in, how the
+match sits relative to the simulator's constraint source) — another
+all-matched binary or another text-overlap weight cannot separate a pair
+that ties on both.
 
 **ADOPTED: `per_field_depth` 800 → 1000, reopening a decision this file said
 not to re-litigate. 0.900004 → 0.903604 (2026-08-31).**

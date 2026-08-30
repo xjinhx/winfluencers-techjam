@@ -59,6 +59,11 @@ class Agent:
         )
         self.clarifier = ClarificationPolicy(self.config.dialogue)
         self.sessions: dict[str, ShoppingState] = {}
+        # Survivor lists for the conjunctive injection, keyed by the exact
+        # active_spans() tuple. Catalog-dependent only, so entries stay valid
+        # across sessions; cleared on apply_config to bound memory over long
+        # tuning sweeps.
+        self._span_cache: dict[tuple[str, ...], list[int]] = {}
         self._trace = (
             Path(self.config.trace_path).open("a", encoding="utf-8")
             if self.config.trace_path
@@ -85,6 +90,24 @@ class Agent:
         self.ranker = Ranker(config.ranking, config.priors, config.constraints)
         self.clarifier = ClarificationPolicy(config.dialogue)
         self.sessions.clear()
+        self._span_cache.clear()
+
+    def _span_survivors(self, spans: tuple[str, ...]) -> list[int]:
+        """Every product whose search_blob contains every span, verbatim.
+
+        A full scan is ~0.2s over 50k products; the span set only changes on
+        turns that disclose something new (refusals and nudges leave it
+        untouched), so the cache collapses a session's ten turns to two or
+        three scans.
+        """
+        cached = self._span_cache.get(spans)
+        if cached is None:
+            cached = [
+                p.idx for p in self.catalog.products
+                if all(s in p.search_blob for s in spans)
+            ]
+            self._span_cache[spans] = cached
+        return cached
 
     # -- contract --------------------------------------------------------
     def reset(self, session_id: str, user_profile: dict) -> None:
@@ -149,11 +172,28 @@ class Agent:
         if not candidate_ids:
             return self._empty_response(state, top_k)
 
+        # Conjunctive injection (PRD_conjunctive_injection.md). The gate tests
+        # len(matched) -- selectivity of the conjunction itself -- not the
+        # post-dedup count, so a conjunction too common to trust is skipped
+        # outright rather than truncated by some other order.
+        injected: list[int] = []
+        spans = state.active_spans()
+        if len(spans) >= retrieval.injection_min_spans:
+            matched = self._span_survivors(spans)
+            if 0 < len(matched) <= retrieval.injection_max_survivors:
+                existing = set(candidate_ids)
+                injected = [i for i in matched if i not in existing]
+        if injected:
+            candidate_ids = candidate_ids + injected
+
         ctx = ScoringContext(
             catalog=self.catalog,
             constraints=state.constraints,
             profile=state.profile,
-            fused=theoretical_minmax({i: fused[i] for i in candidate_ids}),
+            # `if i in fused`: an injected survivor that neither BM25 nor dense
+            # retrieved has no fused entry and scores 0.0 on that feature, the
+            # same way an absent per-field or dense score already does.
+            fused=theoretical_minmax({i: fused[i] for i in candidate_ids if i in fused}),
             per_field={
                 field: theoretical_minmax(
                     {i: scores[i] for i in candidate_ids if i in scores}
@@ -171,7 +211,14 @@ class Agent:
             intent=decision.intent,
         )
 
-        candidates = [self.catalog.products[i] for i in candidate_ids[: retrieval.rerank_depth]]
+        # Injected survivors sit past the rerank_depth cut by construction
+        # (appended after a full fused slice), so re-append whatever it drops
+        # -- the reranked set grows by the survivors, never loses fused pool.
+        rerank_ids = candidate_ids[: retrieval.rerank_depth]
+        if injected:
+            kept = set(rerank_ids)
+            rerank_ids = rerank_ids + [i for i in injected if i not in kept]
+        candidates = [self.catalog.products[i] for i in rerank_ids]
         ranked = self.ranker.rank(
             candidates, ctx, top_k, diversify=(decision.intent == BROWSING)
         )
