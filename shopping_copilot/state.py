@@ -319,6 +319,24 @@ class ShoppingState:
         out.update(t for t in tokenize(self.category_phrase) if t not in BOILERPLATE_TERMS)
         return out
 
+    def active_spans(self) -> tuple[str, ...]:
+        """Live constraint text kept WHOLE, not tokenised.
+
+        The customer quotes the target's own copy verbatim, so the full span is
+        far more discriminative than its parts: "95% Polyester, 5% Spandex"
+        matches 5.3% of a category where "polyester" alone matches 41.2%.
+        Tokenising it -- which `active_terms` and `active_bigrams` both do --
+        throws that away.
+        """
+        out: list[str] = []
+        for span in self.spans:
+            if span.superseded:
+                continue
+            text = " ".join(str(span.text).lower().split())
+            if len(text) > 3:
+                out.append(text)
+        return tuple(dict.fromkeys(out))
+
     def active_bigrams(self) -> set[str]:
         """Ordered bigrams of live constraint text.
 

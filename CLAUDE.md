@@ -84,10 +84,11 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.876342`** — measured 2026-08-30 by running the
+**Live score: `TechnicalScore = 0.888187`** — measured 2026-08-30 by running the
 committed `config/tuned.json` through the unmodified evaluator on all 200 public
-sessions. Up from 0.862111 — see "What was found" below (`per_field_depth`
-220 → **800**, a recall fix, not a reranking fix).
+sessions. Two changes got here from 0.862111, and they are independent:
+`per_field_depth` 220 → **800** (a recall fix, +0.0142) and `w_span_all` = **0.4**
+(a precision fix, +0.0118). See "What was found".
 
 **On 800 vs. 1000:** this was independently found twice — Dylan tested and
 adopted `1000` (0.876336) before discovering He/Joey had independently pushed
@@ -100,17 +101,17 @@ Don't re-litigate 1000 vs. 800 based on this tiny gap.
 | metric | value |
 |---|---|
 | HR@10 | 0.985 (3 misses, down from 8) |
-| MRR | 0.679141 |
-| MTTC | 1.995 |
-| Efficiency | 0.9005 |
-| **TechnicalScore** | **0.876342** |
+| MRR | 0.717956 |
+| MTTC | 1.985 |
+| Efficiency | 0.9015 |
+| **TechnicalScore** | **0.888187** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7245 | 1.29 |
-| browsing | 80 | 0.9625 | 0.5907 | 2.05 |
-| intent_override | 30 | 1.0000 | 0.7972 | 3.70 |
-| boundary | 10 | 1.0000 | 0.6700 | 2.10 |
+| buying | 80 | 1.0000 | 0.7516 | 1.275 |
+| browsing | 80 | 0.9625 | 0.6418 | 2.05 |
+| intent_override | 30 | 1.0000 | 0.8722 | 3.70 |
+| boundary | 10 | 1.0000 | 0.5950 | 2.00 |
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
 `w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
@@ -258,6 +259,181 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**ADOPTED: `span_all` — constraint spans matched in full. 0.876342 → 0.888187
+(2026-08-30, He Jinhong).** The first change all session to gain more on
+held-out data than on the fold it was fitted to.
+
+**The defect.** The customer quotes the target's own copy verbatim, and the
+agent dissolved those quotes into tokens. `"95% Polyester, 5% Spandex"` became
+`{95, polyester, 5, spandex}`, which BM25 matches against 41% of a category —
+where the intact phrase matches **5.3%**. The only survivor of the span
+structure was `phrase_*` (ordered-bigram *overlap*, weight 0.13), and overlap
+**cannot distinguish "3 of 4 spans matched" from "all 4"** because both can
+produce identical bigram sets. The conjunction was not representable at all.
+
+**Why the conjunction is the whole game — `public_0092`, disclosed in order:**
+
+```
+after           constraint                     survivors   target still in?
+turn 2          imported                              86         True
+turn 2          button closure                        14         True
+turn 3          polyester                              9         True
+turn 3          95% Polyester, 5% Spandex              2         True
+```
+
+284 → 2. **The agent held all four strings by turn 3 and ranked the target
+39th.** Each constraint alone is boilerplate (13-41% of the category); together
+they are nearly unique.
+
+**The fix.** `state.active_spans()` keeps live constraint text whole;
+`Product.search_blob` is a lowercased match surface built once at load;
+`features.py` gains `span_coverage` (fraction matched) and `span_all` (1.0 iff
+*every* span matches). `FEATURE_NAMES` 36 → 38.
+
+**Measured, fold A only for selection, fold B once:**
+
+```
+fold A  0.872192 -> 0.883120   (+0.010928)
+fold B  0.880493 -> 0.893253   (+0.012760)     <- gains MORE held-out than fitted
+full    0.876342 -> 0.888187   (+0.011845)
+```
+
+| scenario | MRR before | after | Δ |
+|---|---|---|---|
+| intent_override | 0.7972 | 0.8722 | **+0.075** |
+| browsing | 0.5907 | 0.6418 | **+0.051** |
+| buying | 0.7245 | 0.7516 | +0.027 |
+| boundary (n=10) | 0.6700 | 0.5950 | **−0.075** |
+
+The spread follows the mechanism: browsing and override disclose constraints
+across several turns, so there are spans to conjoin; buying discloses one up
+front and a lone span has no conjunction to exploit.
+
+**Why this is believed despite +0.0128 being under single-run SE (~0.029).**
+Four independent signatures, none of which the twelve failed attempts had:
+(1) monotone response saturating — 0.05→0.4 improves, 0.8 identical, not a
+jagged peak; (2) fold B > fold A; (3) the metric signature was **predicted in
+writing before the run** (HR@10 flat, MRR up) and came out exact — HR@10 moved
++0.0000 in *every* scenario; (4) `span_coverage` measures **zero** at every
+weight, so the entire effect is the conjunctive bit, which is precisely the
+information that was previously unrepresentable. **Still labelled unverified,
+not proven** — the margin is under SE.
+
+**Honest negatives.** Boundary regressed −0.075 MRR, which on n=10 is one
+session falling from about rank 1 to rank 4 — noise, but recorded.
+`w_span_all = 0.4` was selected on fold A, so this carries one fitted
+parameter. `w_span_coverage` stays 0.0.
+
+**Why twelve other attempts failed and this did not.** Every one of them
+redistributed weight among features that all measured the same thing — text
+overlap under different names. This added a bit of information the vector did
+not contain: *does this candidate satisfy all of the customer's constraints at
+once*. **When a change fails on holdout, ask whether it was moving weight or
+adding information.**
+
+**`public_0092` diagnosed: structurally unwinnable, not a retrieval or ranking
+failure (2026-08-30, He Jinhong).** Closes the "3 misses remain — not diagnosed
+this pass" gap below.
+
+Traced turn by turn with the target forced into the candidate pool:
+
+```
+turn   pool   target in pool   target rank
+   1    280            True            206
+   2    320            True             91
+   3    354            True             39
+ 4-10   354            True             39      <- frozen
+```
+
+Rank improves while constraints are disclosed, then **freezes for seven turns**.
+The cause is that the customer runs out of things to say. `intent_card()` gives
+this target exactly four constraints, and `customer_reply` discloses at most two
+per ask:
+
+```
+[material] polyester                     appears in 41.2% of the category
+[material] 95% Polyester, 5% Spandex     (spandex: 27.5%)
+[feature ] Imported                      appears in 30.3% of the category
+[feature ] Button closure                appears in 13.0% of the category
+```
+
+Two productive questions exhaust the customer; every other attribute returns
+"I don't have an additional preference for X". And what *is* disclosed narrows
+284 pajama sets to roughly a third of them. **The information needed to identify
+this product does not exist anywhere in the session** — the target carries no
+colour, no brand signal, no price, and describes itself in the same words as a
+hundred others.
+
+**Why this matters beyond one session:** both `per_field_depth=800` and the
+category union (below) correctly leave `public_0092` a miss. Neither is broken.
+It belongs in the genuinely-undecidable bucket this file already sizes at ~6
+targets, and it sets a floor on miss-conversion work that is not a tuning
+problem. **Do not spend further effort on it.**
+
+**Category-union candidate injection: mechanism total, score null (2026-08-30,
+He Jinhong).** Measured against the **0.862111** baseline, *before* the
+`per_field_depth` merge — do not compare these deltas to 0.876342.
+
+Hypothesis: the customer names a taxonomy node verbatim in turn 1
+(`coarse_category`, 1,115 distinct values, median pool 8), and the agent was
+treating it as a bag of words. Built `catalog.by_coarse_category` and unioned
+the node's members into the candidate pool.
+
+**The mechanism worked completely** — turn-1 pool membership **80% → 100%**,
+every scenario, 4 real misses converted, MTTC −0.25. **The score did not
+follow:**
+
+| variant | fold A | fold B vs incumbent |
+|---|---|---|
+| union, incumbent weights | +0.0167 | **−0.000271** |
+| union, retuned on fold A (8 params) | +0.0051 | **−0.013863** |
+
+Per-session sign test: 5 better, 11 worse, 184 unchanged. The aggregate is
+positive only because converting 4 misses is worth a lot in HR@10 while the
+dilution cost is spread thinly across more sessions.
+
+**Retuning made it worse, and legibly so.** The tuner cut
+`w_log_rating_number` 0.88 → 0.4, because the union injects candidates *ordered
+by popularity* and weighting popularity again double-counts it. Correct on fold
+A; on fold B that weight was doing real work and MRR collapsed 0.7049 → 0.6420.
+The same double-counting trap as the `fused` signal, arriving by a new route —
+except here the "fix" was the overfit.
+
+**Not adopted.** `category_union_size` defaults to 0. Superseded by
+`per_field_depth: 220 → 800`, which fixes the same defect (target absent from
+the pool) with the same signature (HR@10 up, MRR down, MTTC down) for +0.0142
+via a one-line config change instead of ~115 lines. **Untested:** the union on
+top of `per_field_depth=800`. Expected to fail worse — its failure mode is MRR
+dilution and 800 already widens the pool — but that is a prediction, not a
+measurement.
+
+**Withholding recommendations while asking: mechanism real, cost dominates
+(2026-08-30, He Jinhong).** Also measured against **0.862111**.
+
+`best_rank` is first-hit-in-top-10 and the evaluator **breaks on first hit**, so
+recommending early locks in whatever rank you have. `recommend_on_ask_turns`
+was `True` and had never been tuned (`SEARCH_SPACE` holds only floats).
+
+| config | HR@10 | MRR | MTTC | Score |
+|---|---|---|---|---|
+| baseline | 0.960 | 0.6897 | 2.24 | **0.862111** |
+| withhold, budget=2 | 0.810 | 0.6588 | 3.92 | 0.744241 |
+| withhold, budget=3 | 0.900 | 0.8217 | 3.885 | 0.838800 |
+| withhold, budget=4 | 0.910 | 0.8355 | 4.63 | 0.833039 |
+| withhold, budget=8 | 0.925 | 0.8525 | 8.225 | 0.773764 |
+
+**MRR rises by up to +0.163** — ranks really are being locked in badly. But
+HR@10 falls and MTTC blows out, and the best variant is −0.0233. Decomposed at
+budget=3: MRR +0.0396, HR@10 −0.0300, MTTC −0.0329.
+
+**The HR@10 loss is the surprising part** and worth remembering: withholding
+loses 12 sessions *even with seven turns left to recommend*. More disclosed
+information makes retrieval worse on some sessions — consistent with 53% of
+what a customer can state being boilerplate (`Package Dimensions`,
+`Date First Available`). **Asking more is not free, and not only in turns.**
+
+**Not adopted.** Early recommendation is a hedge that is paying.
+
 **Reconciled with Joey's independent `per_field_depth=800` + NQC confidence
 change (2026-08-30, Dylan Huang):** `main` moved again after the entry below
 was written — Joey independently landed `per_field_depth=800` (same lever,
@@ -377,7 +553,9 @@ which is a different and less structurally-safe kind of change than this
 one.
 
 **3 misses remain** (`public_0092`, `public_0137`, `public_0161`) — not
-diagnosed this pass.
+diagnosed in that pass. **`public_0092` has since been diagnosed** and is
+structurally unwinnable; see the top entry. `public_0137` / `public_0161` /
+`public_0100` remain undiagnosed.
 
 **Intent-router disagreement check (PRD Phase 5, read-only, 2026-08-30, Dylan Huang):**
 

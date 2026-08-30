@@ -131,6 +131,14 @@ class RankingConfig:
     w_phrase_title: float = 0.320
     w_phrase_features: float = 0.520
     w_phrase_categories: float = 0.240
+
+    # Constraint spans matched IN FULL, vs `phrase_*` which measures bigram
+    # overlap and cannot distinguish "3 of 4 spans" from "all 4". The
+    # conjunction is the discriminative part: on public_0092 the four disclosed
+    # spans cut 284 candidates to 2, while each alone matches 13-41%.
+    # Default 0.0 -- inert until tuned, so the incumbent is exactly recoverable.
+    w_span_coverage: float = 0.0
+    w_span_all: float = 0.0
     w_coverage: float = 0.300
 
     w_profile_affinity: float = 0.030

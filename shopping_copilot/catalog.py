@@ -68,6 +68,7 @@ class Product:
     description_text: str
     store: str
     category_path: tuple[str, ...]
+    search_blob: str            # lowercased title+features+categories+description, for span matching
     gender: str | None          # canonical, from details.Department
     gender_fallback: str | None  # canonical, inferred from title/categories
     brand_key: str              # normalised `store`, for exact brand match
@@ -187,6 +188,10 @@ class Catalog:
                     description_text=flatten(description),
                     store=str(row.get("store") or ""),
                     category_path=category_path,
+                    search_blob=" ".join([
+                        title, features_text, flatten(row.get("categories")),
+                        flatten(description),
+                    ]).lower(),
                     gender=_canon_gender(details.get("Department")),
                     gender_fallback=_gender_fallback(title, category_path),
                     brand_key=_brand_key(row.get("store")),
