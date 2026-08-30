@@ -25,6 +25,13 @@ SATISFIED = "satisfied"
 VIOLATED = "violated"
 UNKNOWN = "unknown"
 
+# The slot names clear_soft() is allowed to touch -- "preference-shaped" slots,
+# as opposed to gender/categories, which describe *what kind of thing* is
+# being bought and are kept through an override regardless of which attribute
+# changed. Shared with state.py so an override can scope its reset to only
+# the attribute(s) the customer actually re-stated.
+SOFT_FIELDS = frozenset({"materials", "colors", "sizes", "use_cases", "brands", "price"})
+
 # Mirrors the vocabulary the simulated customer actually uses.
 MATERIALS = (
     "cotton", "polyester", "nylon", "leather", "wool", "spandex", "silk",
@@ -98,15 +105,28 @@ class Constraints:
             out.append("price")
         return out
 
-    def clear_soft(self) -> None:
-        """Drop the preference-shaped slots on an intent override, keeping the
-        ones that describe *what kind of thing* is being bought."""
-        self.materials.clear()
-        self.colors.clear()
-        self.sizes.clear()
-        self.use_cases.clear()
-        self.brands.clear()
-        self.price_max = None
+    def clear_soft(self, only: set[str] | None = None) -> None:
+        """Drop preference-shaped slots on an intent override, keeping the
+        ones that describe *what kind of thing* is being bought.
+
+        `only` scopes the reset to specific slot names (as returned by
+        `filled_slots()`) -- e.g. an override that only re-states color
+        should not also wipe an already-disclosed budget. Pass None (the
+        default) for the old unconditional behaviour: clear every soft slot.
+        """
+        fields = SOFT_FIELDS if only is None else (only & SOFT_FIELDS)
+        if "materials" in fields:
+            self.materials.clear()
+        if "colors" in fields:
+            self.colors.clear()
+        if "sizes" in fields:
+            self.sizes.clear()
+        if "use_cases" in fields:
+            self.use_cases.clear()
+        if "brands" in fields:
+            self.brands.clear()
+        if "price" in fields:
+            self.price_max = None
 
 
 class BrandVocabulary:
