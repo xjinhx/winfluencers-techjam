@@ -84,11 +84,9 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.881716`** — measured 2026-08-30 by running the
-committed `config/tuned.json` through the unmodified evaluator on all 200 public
-sessions. Up from 0.876342 — see "What was found" below
-(`constraint_commonness_penalty` 0.0 → **0.3**, on branch
-`fix/public-0100-candidate-depth`, not yet merged to `main`).
+**Live score: `TechnicalScore = 0.892242`** — measured 2026-08-30 by running the
+adopted title/coverage interaction config through the unmodified evaluator on
+all 200 public sessions. Up from 0.881716 — see "What was found" below.
 
 **On 800 vs. 1000 (`per_field_depth`):** this was independently found twice —
 Dylan tested and adopted `1000` (0.876336) before discovering He/Joey had
@@ -101,16 +99,16 @@ quality one. Don't re-litigate 1000 vs. 800 based on this tiny gap.
 | metric | value |
 |---|---|
 | HR@10 | 0.990 (2 misses, down from 3) |
-| MRR | 0.687054 |
+| MRR | 0.722139 |
 | MTTC | 1.97 |
 | Efficiency | 0.903 |
-| **TechnicalScore** | **0.881716** |
+| **TechnicalScore** | **0.892242** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7301 | 1.31 |
-| browsing | 80 | 0.9750 | 0.6048 | 1.96 |
-| intent_override | 30 | 1.0000 | 0.7972 | 3.70 |
+| buying | 80 | 1.0000 | 0.7721 | 1.31 |
+| browsing | 80 | 0.9750 | 0.6397 | 1.96 |
+| intent_override | 30 | 1.0000 | 0.8261 | 3.70 |
 | boundary | 10 | 1.0000 | 0.6700 | 2.10 |
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
@@ -118,15 +116,16 @@ quality one. Don't re-litigate 1000 vs. 800 based on this tiny gap.
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
+- **0.881716** predates the title/coverage interaction adopted below.
 - **0.862111, 0.863556, 0.876336, and 0.876342** (and the miss lists that went
   with them) all predate the `constraint_commonness_penalty` fix below.
   0.862111 is pre-merge-with-main; 0.863556 is post-merge-pre-fix;
   0.876336 was Dylan's own `per_field_depth=1000` before reconciling with
   Joey's `800` already on `main`; 0.876342 is the reconciled `800` value,
   current on `main` but superseded on this branch.
-- `results.json` = **0.847625** (run 2026-08-30 01:03, eight hours before
-  `config/tuned.json` was last edited) and `results_tuned.json` = **0.784838**.
-  Both predate the current config. `README.md` still headlines 0.8476.
+- `results.json` = **0.881716** and predates the current config. It was preserved
+  rather than overwritten per Critical rule 1; the validated current output is
+  `scratch/title_experiments/integrated_live.json`.
 - `docs/pending.md` was written at the 0.7848 stage. Its P-item numbering is
   still useful, its measurements are not — see "Roadmap".
 
@@ -259,6 +258,46 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**Title/coverage interaction adopted (2026-08-30, per He Jinhong: "try others,
+can merge a few together"):**
+
+The earlier blanket title-length and density fixes did not generalize. A fresh
+36-column trace was therefore generated against the 0.881716 baseline and
+validated at 200/200 live/offline session agreement before testing 52 surgical
+single changes across score transforms, pool-relative clipping, intent-specific
+weights, cross-field interactions, structured gates, and relevance-conditioned
+popularity. Twelve singles improved both `stratified_halves(seed=7)` folds.
+
+The adopted three-term combination is:
+
+- buying-only `bm25_title` weight: 0.26 -> **0.18**
+- `bm25_title * (1 - coverage)` weight: **-0.20**
+- `popularity * (1 - coverage)` weight: **-0.40**
+
+This is not a title-length penalty. Detailed titles retain their evidence when
+they cover the query; only title and popularity confidence unsupported by query
+coverage is reduced. The buying-only override limits the original BM25 title
+term where disclosed constraints provide stronger evidence.
+
+Seed-7 split result: train **+0.010138**, holdout **+0.010913**. Full public-set
+result: `TechnicalScore` 0.881716 -> **0.892242** (+0.010526), MRR 0.687054 ->
+**0.722139**, with HR@10 (0.990), MTTC (1.97), and efficiency (0.903) unchanged.
+All scenario deltas are non-negative: browsing +0.010464, buying +0.012600,
+intent override +0.008667, boundary unchanged.
+
+The local 5x5x5 neighborhood has a broad plateau: multiple neighboring penalty
+pairs produce the same ordering. Paired bootstrap over 20,000 resamples gives
+a TechnicalScore delta CI of **[+0.005882, +0.015843]**; 29 sessions improve,
+one regresses, and 170 are unchanged. Across 100 stratified seeds (200 halves),
+the minimum half delta is +0.003317 and no half is negative.
+
+Implementation adds the two interactions as explicit named features and extends
+the existing per-intent override mechanism to `bm25_title`. Defaults are zero /
+unset, preserving old configurations. The integrated full evaluator produces
+0.892242 exactly; offline replay matches all 200 session ranks with zero MRR
+drift. 34/34 unit tests pass. Experiment grids and validation reports live in
+`scratch/title_experiments/`.
 
 **`constraint_commonness_penalty` adopted — the deeper fix for `public_0100`,
 generalizes to a second session (2026-08-30, Dylan Huang, branch

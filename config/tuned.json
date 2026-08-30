@@ -53,6 +53,7 @@
   "ranking": {
     "w_fused": 1.0,
     "w_bm25_title": 0.26,
+    "w_bm25_title_buying": 0.18,
     "w_bm25_features": 0.3,
     "w_bm25_categories": 0.11,
     "w_dense": 0.18,
@@ -60,6 +61,8 @@
     "w_phrase_features": 0.13,
     "w_phrase_categories": 0.5,
     "w_coverage": 0.6,
+    "w_title_low_coverage": -0.2,
+    "w_popularity_low_coverage": -0.4,
     "w_profile_affinity": 0.06,
     "w_category_focus": 0.0,
     "enable_mmr": false,

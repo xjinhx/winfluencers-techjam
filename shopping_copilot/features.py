@@ -43,6 +43,8 @@ FEATURE_NAMES: tuple[str, ...] = (
     "phrase_features",
     "phrase_categories",
     "coverage",
+    "title_low_coverage",
+    "popularity_low_coverage",
     "popularity",
     "quality",
     "has_price",
@@ -96,6 +98,7 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
 
     coverage = _overlap(ctx.query_terms, searchable)
     category_focus = _overlap(ctx.category_terms, title_tokens | category_tokens)
+    bm25_title = ctx.per_field.get("title", {}).get(doc_id, 0.0)
 
     phrase_title = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "title"))
     phrase_features = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "features"))
@@ -105,7 +108,7 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
 
     vector = [
         ctx.fused.get(doc_id, 0.0),
-        ctx.per_field.get("title", {}).get(doc_id, 0.0),
+        bm25_title,
         ctx.per_field.get("features", {}).get(doc_id, 0.0),
         ctx.per_field.get("categories", {}).get(doc_id, 0.0),
         ctx.per_field.get("description", {}).get(doc_id, 0.0),
@@ -115,6 +118,8 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
         phrase_features,
         phrase_categories,
         coverage,
+        bm25_title * (1.0 - coverage),
+        product.popularity * (1.0 - coverage),
         product.popularity,
         product.quality,
         1.0 if product.has_price else 0.0,

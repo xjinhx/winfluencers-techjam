@@ -131,6 +131,9 @@ class RankingConfig:
     w_fused_uncertain: float | None = None
 
     w_bm25_title: float = 0.260
+    w_bm25_title_buying: float | None = None
+    w_bm25_title_browsing: float | None = None
+    w_bm25_title_uncertain: float | None = None
     w_bm25_features: float = 0.300
     w_bm25_categories: float = 0.220
     w_dense: float = 0.180
@@ -142,6 +145,12 @@ class RankingConfig:
     w_phrase_features: float = 0.520
     w_phrase_categories: float = 0.240
     w_coverage: float = 0.300
+
+    # Penalise lexical confidence that is not backed by whole-query coverage.
+    # These interaction weights default to zero so existing configurations are
+    # byte-for-byte equivalent until an evaluated setting opts in.
+    w_title_low_coverage: float = 0.0
+    w_popularity_low_coverage: float = 0.0
 
     w_profile_affinity: float = 0.030
     w_category_focus: float = 0.070
