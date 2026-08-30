@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass, field
 
 from .profile import ShopperProfile
-from .structured import ConstraintExtractor, Constraints
+from .structured import SOFT_FIELDS, ConstraintExtractor, Constraints
 from .text import bigrams, tokenize
 
 # Phrases the simulator wraps around real content. Stripped before tokenising.
@@ -71,6 +71,31 @@ _CATEGORY_RE = re.compile(r"looking for\s+(.+?)(?:[.,]|$)", re.I)
 _LEAD_IN_RE = re.compile(
     r"(?:requirement is|matters is|need is|want is|preference:)\s*:?\s*(.+)$", re.I
 )
+
+# Within a single override utterance, text after one of these cues names the
+# value being REPLACED, e.g. "white sneakers instead of black running shoes".
+# Scanning that half for constraints would re-introduce the very thing the
+# customer just overrode, so it is stripped before extraction runs.
+_OVERRIDE_CUE_RE = re.compile(r"\binstead of\b|\brather than\b|\bnot\b", re.I)
+
+
+def _kept_text(text: str) -> str:
+    """The part of a constraint span describing the CURRENT value only."""
+    match = _OVERRIDE_CUE_RE.search(text)
+    return text[: match.start()].strip(" .,:;") if match else text
+
+
+def _touched_fields(extractor: ConstraintExtractor, text: str) -> set[str]:
+    """Which Constraints slots would extracting `text` alone fill in.
+
+    Used to scope an override to the attribute(s) it actually re-states --
+    a color change should not also wipe an already-disclosed budget -- and
+    to decide which *existing* spans are about that same attribute and
+    should therefore be demoted.
+    """
+    scratch = Constraints()
+    extractor.update(scratch, text)
+    return set(scratch.filled_slots())
 
 
 @dataclass
@@ -173,17 +198,39 @@ class ShoppingState:
         if utterance.category_phrase and not self.category_phrase:
             self.category_phrase = utterance.category_phrase
 
-        # An override retracts everything disclosed before it. Demote, do not
-        # delete: withdrawn preferences stop being checked but still describe
-        # the neighbourhood of the catalog in play.
+        # An override retracts what it actually re-states, not everything.
+        # Demote, don't delete: a withdrawn preference stops being checked but
+        # its words still describe the neighbourhood of the catalog in play.
+        texts_to_add = utterance.constraints
         if utterance.is_override and utterance.constraints:
             self.override_turn = turn
-            for span in self.spans:
-                span.superseded = True
-                span.weight *= override_decay
-            self.constraints.clear_soft()
+            kept_texts = [_kept_text(text) for text in utterance.constraints]
 
-        for text in utterance.constraints:
+            touched: set[str] = set()
+            for text in kept_texts:
+                touched |= _touched_fields(self.extractor, text)
+            touched &= SOFT_FIELDS   # never gender/category -- those are kept regardless
+
+            if touched:
+                # Surgical: only demote spans about the SAME attribute(s) the
+                # customer just re-stated, e.g. only color, not price.
+                for span in self.spans:
+                    if not span.superseded and _touched_fields(self.extractor, span.text) & touched:
+                        span.superseded = True
+                        span.weight *= override_decay
+                self.constraints.clear_soft(only=touched)
+            else:
+                # Couldn't tell which attribute changed (no recognisable slot
+                # in the new text) -- fall back to the old blanket reset
+                # rather than silently leaving stale state in place.
+                for span in self.spans:
+                    span.superseded = True
+                    span.weight *= override_decay
+                self.constraints.clear_soft()
+
+            texts_to_add = kept_texts   # never re-extract the rejected half
+
+        for text in texts_to_add:
             self.spans.append(ConstraintSpan(text=text, turn=turn))
             self.extractor.update(self.constraints, text)
 
