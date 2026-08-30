@@ -237,6 +237,28 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Intent-router disagreement check (PRD Phase 5, read-only, 2026-08-30, Dylan Huang):**
+
+Measured how often `intent.route()`'s dominant per-session classification
+disagrees with `scenario_type` (available offline only — never sent to the
+live agent). Raw label disagreement looked large (39.4%, 63/160
+buying/browsing sessions), but that number is misleading: under the
+current config, `w_fused_buying` and `w_fused_uncertain` are both `0.0` —
+**identical treatment** — so a buying↔uncertain mix-up has zero scoring
+effect. Re-measured on the metric that actually matters, the effective
+`w_fused` bucket (browsing vs. everything else): **4.4% disagreement
+(7/160)**, and every single case is the same direction — a `browsing`
+scenario session classified as `buying`/`uncertain`, meaning it wrongly
+gets `w_fused=0.0` instead of the `1.0` browsing needs.
+
+Not investigated further this pass (Phase 5 is explicitly informational,
+not blocking) but worth flagging: this is a plausible small contributor to
+browsing being the weakest scenario on every metric. A targeted next step,
+not done here: inspect what pushes exactly these 7 sessions' constraint-
+density/marker-score above the 0.65 buying threshold despite being labeled
+browsing, rather than retuning the router generally.
+
+**Pairwise learning-to-rank experiment: implemented, tested across a
 **Pairwise learning-to-rank experiment: implemented, tested across a
 hyperparameter grid, rejected with strong evidence (2026-08-30, Dylan Huang):**
 
