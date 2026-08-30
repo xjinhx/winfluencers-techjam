@@ -348,7 +348,28 @@ historical): P0 untouched · P1 **done**, though via per-intent ranking weights
 rather than the retrieval multipliers it proposed · P2 untouched · P3 diagnosed
 but superseded (18 misses → 8) · P4 untouched · P5 undecided.
 
-## Open risk — modified evaluator on `origin/main`
+## RESOLVED — modified evaluator on `origin/main`
+
+**Resolved 2026-08-30.** Reverted on `origin/main` by `fa8f9a9 "revert: restore
+pre-Phase4 local_evaluator.py"` and `fb17283 "revert: restore pre-Phase4
+tests/test_evaluator.py"`. Verified: `git diff upstream/main origin/main --
+evaluator/local_evaluator.py` is empty, i.e. byte-identical to the organizer's
+copy. No submission risk outstanding.
+
+**Re-check this before submitting** — it is one command, and the failure is
+silent:
+
+```bash
+git diff --stat upstream/main <your-branch> -- evaluator/
+# any output at all = the evaluator has been modified again
+```
+
+The original entry is kept below rather than deleted, because the way it got in
+matters more than the fix: it arrived under a commit message that said `docs:`.
+
+---
+
+### Original entry — modified evaluator on `origin/main`
 
 **`origin/main` carries a modified `evaluator/local_evaluator.py`** (+237/−64
 vs `upstream/main`), introduced in commit `7303cea`, whose message reads
@@ -362,9 +383,8 @@ The change itself is the `dylan-data-error` robustness work (`validate_session()
 per-session failure isolation, 35 new tests) and
 `docs/DATA_ROBUSTNESS_IMPLEMENTATION.md` states the public-set metrics come out
 identical — so it is not score manipulation. But the rule has no exception for
-well-tested changes, and it currently sits on the branch a submission would be
-cut from. **Unresolved. Decide before submitting; do not let it be discovered
-at judging.**
+well-tested changes, and it sat on the branch a submission would be cut from.
+**Superseded by the resolution above — kept as the record of how it happened.**
 
 ## Out of scope for current work
 
