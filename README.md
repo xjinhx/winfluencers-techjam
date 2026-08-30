@@ -15,7 +15,7 @@ evaluator (`evaluator/local_evaluator.py`, unmodified).
 |---|---|---|---|---|
 | Official weak BM25 baseline | 0.125 | 0.068 | 9.81 | 0.1067 |
 | Ours — default weights | 0.885 | 0.554 | 3.23 | 0.7641 |
-| **Ours — tuned** | **0.910** | **0.565** | **2.98** | **0.7848** |
+| **Ours — tuned** | **0.960** | **0.643** | **2.27** | **0.8476** |
 
 `TechnicalScore = 0.50 × HR@10 + 0.30 × MRR + 0.20 × Efficiency`
 
@@ -26,10 +26,10 @@ Per scenario, tuned:
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 0.925 | 0.5505 | 2.33 |
-| browsing | 80 | 0.887 | 0.5629 | 3.09 |
-| intent override | 30 | 0.900 | 0.5500 | 4.53 |
-| boundary | 10 | 1.000 | 0.7386 | 2.70 |
+| buying | 80 | 0.975 | 0.6508 | 1.54 |
+| browsing | 80 | 0.938 | 0.5876 | 2.30 |
+| intent override | 30 | 0.967 | 0.6987 | 3.97 |
+| boundary | 10 | 1.000 | 0.8583 | 2.70 |
 
 The tuned row is fitted on a 100-session half of this same set, so it is
 optimistically biased. The unbiased estimate is the held-out half: **0.7763 →
@@ -223,10 +223,10 @@ Runs all 200 public sessions and writes per-session results and aggregate
 metrics to `results.json`. Expected output:
 
 ```
-HR@10  0.910
-MRR    0.565
-MTTC   2.98
-TechnicalScore  0.7848
+HR@10  0.960
+MRR    0.643
+MTTC   2.27
+TechnicalScore  0.8476
 ```
 
 Tuned weights live in `config/tuned.json` and are loaded automatically by
