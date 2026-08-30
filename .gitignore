@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+.venv/
 .DS_Store
 .env
 results.json
@@ -16,3 +17,12 @@ docs/participant_release_checklist.md
 tests/test_5core_builder.py
 tests/test_organizer_pipeline.py
 *.log
+
+# Local evaluation artefacts.
+results*.json
+.cache/
+tuning.log
+
+# Internal diagnostic working documents (findings summarised in CLAUDE.md).
+PRD_rank_diagnostic.md
+docs/rank_diagnostic.md

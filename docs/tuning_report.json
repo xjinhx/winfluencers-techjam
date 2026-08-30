@@ -1,0 +1,187 @@
+{
+  "train_sessions": 100,
+  "holdout_sessions": 100,
+  "baseline": {
+    "train": 0.751836,
+    "holdout": 0.776267
+  },
+  "tuned": {
+    "train": {
+      "technical_score": 0.782777,
+      "hit_rate_at_10": 0.91,
+      "mrr": 0.565258,
+      "mttc": 3.09,
+      "efficiency": 0.791
+    },
+    "holdout": {
+      "technical_score": 0.786897,
+      "hit_rate_at_10": 0.91,
+      "mrr": 0.564325,
+      "mttc": 2.87,
+      "efficiency": 0.813
+    }
+  },
+  "history": [
+    {
+      "pass": 0,
+      "parameter": "retrieval.w_features",
+      "from": 1.25,
+      "to": 1.25,
+      "train_score": 0.751836,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "retrieval.w_title",
+      "from": 1.0,
+      "to": 1.0,
+      "train_score": 0.751836,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "retrieval.w_categories",
+      "from": 0.9,
+      "to": 0.7,
+      "train_score": 0.752098,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "retrieval.w_description",
+      "from": 0.45,
+      "to": 0.8,
+      "train_score": 0.759085,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "retrieval.w_store",
+      "from": 0.35,
+      "to": 0.35,
+      "train_score": 0.759085,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "retrieval.fusion_alpha",
+      "from": 0.78,
+      "to": 0.78,
+      "train_score": 0.759085,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_coverage",
+      "from": 0.3,
+      "to": 0.6,
+      "train_score": 0.767048,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_phrase_features",
+      "from": 0.52,
+      "to": 0.52,
+      "train_score": 0.767048,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_phrase_title",
+      "from": 0.32,
+      "to": 0.32,
+      "train_score": 0.767048,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_phrase_categories",
+      "from": 0.24,
+      "to": 0.5,
+      "train_score": 0.771665,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_category_focus",
+      "from": 0.07,
+      "to": 0.0,
+      "train_score": 0.773882,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "priors.w_log_rating_number",
+      "from": 0.15,
+      "to": 0.15,
+      "train_score": 0.773882,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_bm25_features",
+      "from": 0.3,
+      "to": 0.3,
+      "train_score": 0.773882,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_bm25_title",
+      "from": 0.26,
+      "to": 0.26,
+      "train_score": 0.773882,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_bm25_categories",
+      "from": 0.22,
+      "to": 0.11,
+      "train_score": 0.775132,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_dense",
+      "from": 0.18,
+      "to": 0.18,
+      "train_score": 0.775132,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "ranking.w_profile_affinity",
+      "from": 0.03,
+      "to": 0.03,
+      "train_score": 0.775132,
+      "changed": false
+    },
+    {
+      "pass": 0,
+      "parameter": "priors.w_has_price",
+      "from": 0.04,
+      "to": 0.09,
+      "train_score": 0.775427,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "priors.w_n_features",
+      "from": 0.03,
+      "to": 0.07,
+      "train_score": 0.782777,
+      "changed": true
+    },
+    {
+      "pass": 0,
+      "parameter": "constraints.gender_violated",
+      "from": -0.23,
+      "to": -0.23,
+      "train_score": 0.782777,
+      "changed": false
+    }
+  ],
+  "elapsed_seconds": 2689.0
+}

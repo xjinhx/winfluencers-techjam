@@ -1,0 +1,104 @@
+{
+  "sample_count": 200,
+  "rows": [
+    {
+      "technical_score": 0.764051,
+      "hit_rate_at_10": 0.885,
+      "mrr": 0.553504,
+      "mttc": 3.225,
+      "efficiency": 0.7775,
+      "delta": 0.0,
+      "component": "full system"
+    },
+    {
+      "technical_score": 0.762777,
+      "hit_rate_at_10": 0.89,
+      "mrr": 0.536591,
+      "mttc": 3.16,
+      "efficiency": 0.784,
+      "delta": -0.001274,
+      "component": "- dense route (Route B)"
+    },
+    {
+      "technical_score": 0.750199,
+      "hit_rate_at_10": 0.87,
+      "mrr": 0.544331,
+      "mttc": 3.405,
+      "efficiency": 0.7595,
+      "delta": -0.013852,
+      "component": "- phrase / bigram evidence"
+    },
+    {
+      "technical_score": 0.741018,
+      "hit_rate_at_10": 0.86,
+      "mrr": 0.53706,
+      "mttc": 3.505,
+      "efficiency": 0.7495,
+      "delta": -0.023033,
+      "component": "- popularity priors"
+    },
+    {
+      "technical_score": 0.761987,
+      "hit_rate_at_10": 0.885,
+      "mrr": 0.546958,
+      "mttc": 3.23,
+      "efficiency": 0.777,
+      "delta": -0.002064,
+      "component": "- constraint scoring (Route C)"
+    },
+    {
+      "technical_score": 0.316727,
+      "hit_rate_at_10": 0.38,
+      "mrr": 0.185758,
+      "mttc": 7.45,
+      "efficiency": 0.355,
+      "delta": -0.447324,
+      "component": "- clarification policy"
+    },
+    {
+      "technical_score": 0.756499,
+      "hit_rate_at_10": 0.88,
+      "mrr": 0.541665,
+      "mttc": 3.3,
+      "efficiency": 0.77,
+      "delta": -0.007552,
+      "component": "- coverage + category focus"
+    },
+    {
+      "technical_score": 0.765045,
+      "hit_rate_at_10": 0.885,
+      "mrr": 0.557484,
+      "mttc": 3.235,
+      "efficiency": 0.7765,
+      "delta": 0.000994,
+      "component": "- profile personalisation"
+    },
+    {
+      "technical_score": 0.764755,
+      "hit_rate_at_10": 0.895,
+      "mrr": 0.529518,
+      "mttc": 3.08,
+      "efficiency": 0.792,
+      "delta": 0.000704,
+      "component": "- per-field weighting"
+    },
+    {
+      "technical_score": 0.732272,
+      "hit_rate_at_10": 0.83,
+      "mrr": 0.568907,
+      "mttc": 3.67,
+      "efficiency": 0.733,
+      "delta": -0.031779,
+      "component": "candidate depth 200 -> 20"
+    },
+    {
+      "technical_score": 0.76407,
+      "hit_rate_at_10": 0.885,
+      "mrr": 0.553899,
+      "mttc": 3.23,
+      "efficiency": 0.777,
+      "delta": 1.9e-05,
+      "component": "+ MMR diversity (browsing)"
+    }
+  ]
+}
