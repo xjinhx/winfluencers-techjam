@@ -258,8 +258,23 @@ a pure refactor. Confirmed via `python -m unittest discover -s tests`
 (32/32 pass) and a full live evaluator run: `TechnicalScore` unchanged at
 **0.862111**, byte-identical to before. `config/tuned.json` was not
 touched, so this commit does not move the score — it only makes the
-dialogue block reachable by the tuner for the first time. Actually running
-the tuner over the new space is separate, unmeasured follow-up work.
+dialogue block reachable by the tuner for the first time.
+
+**Follow-up, same day: tuned the newly-exposed space, found no gain.** Ran
+a scoped coordinate-ascent pass over just `dialogue.override_decay`
+(`[0.0, 0.15, 0.25, 0.4, 0.6]`) and `dialogue.recency_bonus`
+(`[0.0, 0.08, 0.15, 0.25, 0.4]`) against the `stratified_halves(seed=7)`
+train fold (100 sessions). **Neither improved on the existing hand-picked
+defaults** — `override_decay=0.25` and `recency_bonus=0.15` were already
+at (or tied for) the best score in every candidate tested, on both train
+(0.7644) and holdout (0.7725). `config/tuned.json` unchanged, nothing to
+adopt. Worth recording as a negative result: the two hardcoded defaults
+this branch promoted to config were already good, at least across this
+grid — a finer grid or a joint search with other parameters might still
+find something, but a lone coordinate-ascent pass over just these two
+did not. One data point on tuner cost: ~12.4s per 100-session train-fold
+score with a warm agent (`Bench.apply_config`, no index rebuild) — a full
+~22-parameter pass at 4-5 candidates each would run roughly 15-20 minutes.
 
 **State audit — the docs had drifted from the code (2026-08-30):**
 
