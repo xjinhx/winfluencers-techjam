@@ -181,3 +181,16 @@ class LexicalIndex:
 
     def idf(self, field: str, term: str) -> float:
         return self.fields[field].idf.get(term, 0.0)
+
+    def commonness(self, term: str) -> float:
+        """Fraction of the catalog containing `term`, maximised across the
+        three content-bearing fields (title/features/categories) -- used to
+        soft-damp constraint-span query weight for near-universal
+        boilerplate, independent of each field's own internal
+        `max_df_ratio` hard cutoff (see `state.py`'s `term_commonness`
+        parameter)."""
+        n_docs = self.fields["title"].n_docs or 1
+        return max(
+            self.fields[field].doc_frequency(term) / n_docs
+            for field in ("title", "features", "categories")
+        )
