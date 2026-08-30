@@ -249,6 +249,23 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(len(vector), len(FEATURE_NAMES))
         self.assertTrue(all(isinstance(v, float) for v in vector))
 
+    def test_low_coverage_interactions_are_explicit_features(self):
+        from shopping_copilot.features import FEATURE_INDEX, ScoringContext
+
+        product = self.catalog.get("B000000001")
+        ctx = ScoringContext(
+            catalog=self.catalog,
+            constraints=Constraints(),
+            profile=ShopperProfile.parse({}),
+            fused={}, per_field={"title": {product.idx: 0.75}}, dense={},
+            query_terms={"not-in-product"}, query_bigrams=set(), category_terms=set(),
+        )
+        vector = extract(product, ctx)
+        self.assertAlmostEqual(vector[FEATURE_INDEX["title_low_coverage"]], 0.75)
+        self.assertAlmostEqual(
+            vector[FEATURE_INDEX["popularity_low_coverage"]], product.popularity
+        )
+
 
 class ContractTests(unittest.TestCase):
     """The response must satisfy `docs/agent_api_contract.json`."""
@@ -361,6 +378,20 @@ class IntentFusionTests(unittest.TestCase):
         browsing, _ = ranker.score_candidate(product, self._ctx("browsing"))
         # Browsing keeps the full fused contribution; buying drops it.
         self.assertAlmostEqual(browsing - buying, config.ranking.w_fused, places=6)
+
+    def test_title_override_applies_only_to_its_own_intent(self):
+        config = Config()
+        config.ranking.w_bm25_title_buying = 0.0
+        ranker = Ranker(config.ranking, config.priors, config.constraints)
+        product = self.catalog.get("B000000001")
+        buying_ctx = self._ctx("buying")
+        browsing_ctx = self._ctx("browsing")
+        buying_ctx.per_field = {"title": {product.idx: 1.0}}
+        browsing_ctx.per_field = {"title": {product.idx: 1.0}}
+
+        buying, _ = ranker.score_candidate(product, buying_ctx)
+        browsing, _ = ranker.score_candidate(product, browsing_ctx)
+        self.assertAlmostEqual(browsing - buying, config.ranking.w_bm25_title, places=6)
 
     def test_a_supplied_model_is_never_rewritten(self):
         # The GBDT seam keeps control of its own vector.

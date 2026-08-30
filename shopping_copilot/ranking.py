@@ -30,7 +30,7 @@ from .features import FEATURE_NAMES, ScoringContext, extract
 
 # Feature names that may carry a different weight per routed intent, via a
 # `w_{feature}_{intent}` field on RankingConfig (see Ranker.__init__).
-INTENT_OVERRIDABLE = ("fused", "profile_affinity", "category_focus")
+INTENT_OVERRIDABLE = ("fused", "bm25_title", "profile_affinity", "category_focus")
 
 
 class ScoringModel(Protocol):
@@ -84,6 +84,8 @@ def build_linear_weights(
         "span_coverage": ranking.w_span_coverage,
         "span_all": ranking.w_span_all,
         "coverage": ranking.w_coverage,
+        "title_low_coverage": ranking.w_title_low_coverage,
+        "popularity_low_coverage": ranking.w_popularity_low_coverage,
         "popularity": priors.w_log_rating_number,
         "quality": priors.w_average_rating,
         "has_price": priors.w_has_price,
