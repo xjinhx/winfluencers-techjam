@@ -50,9 +50,10 @@ class ShopperProfile:
     @classmethod
     def parse(cls, payload: dict | None) -> "ShopperProfile":
         payload = payload or {}
+        raw_tags = payload.get("preference_tags")
         tags = tuple(
             str(tag).strip().lower()
-            for tag in (payload.get("preference_tags") or [])
+            for tag in (raw_tags if isinstance(raw_tags, list) else [])
             if str(tag).strip()
         )
         lexicon: list[str] = []
@@ -70,12 +71,6 @@ class ShopperProfile:
             raw=dict(payload),
         )
 
-    @property
-    def is_critical(self) -> bool:
-        return "critical" in self.rating_style or (
-            self.average_prior_rating is not None and self.average_prior_rating <= 2.5
-        )
-
     def affinity(self, title: str, features_text: str) -> float:
         """Fraction of the shopper's preference lexicon present in the listing.
 
@@ -87,15 +82,3 @@ class ShopperProfile:
         haystack = (title + " " + features_text).lower()
         hits = sum(1 for word in self.lexicon if word in haystack)
         return min(1.0, hits / max(3.0, len(self.lexicon) * 0.5))
-
-    def quality_bias(self) -> float:
-        """A critical rater is marginally better served by well-reviewed items.
-
-        Small on purpose: the profile describes how this shopper *rates*, not
-        what they will buy.
-        """
-        if self.is_critical:
-            return 1.0
-        if self.average_prior_rating is not None and self.average_prior_rating >= 4.5:
-            return 0.25
-        return 0.5

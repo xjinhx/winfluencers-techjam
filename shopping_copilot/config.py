@@ -39,6 +39,16 @@ class RetrievalConfig:
     max_df_ratio: float = 0.35
     max_query_terms: int = 48
 
+    # Soft down-weighting of constraint-span query terms by catalog
+    # commonness (state.py's query()), separate from BM25Field's own hard
+    # max_df_ratio cutoff above. Ramps weight down continuously as a term's
+    # document-frequency ratio approaches max_df_ratio, rather than
+    # all-or-nothing at the cutoff -- a few medium-frequency boilerplate
+    # terms (e.g. "manmade sole") compounding together currently each earn
+    # full query weight right up to that point. 0.0 = disabled (default,
+    # preserves prior behaviour exactly).
+    constraint_commonness_penalty: float = 0.0
+
     # Convex combination, not RRF (Bruch et al. 2210.11934). One parameter,
     # tunable on 200 sessions.
     fusion_alpha: float = 0.78  # weight on lexical; (1 - alpha) on dense
@@ -121,6 +131,9 @@ class RankingConfig:
     w_fused_uncertain: float | None = None
 
     w_bm25_title: float = 0.260
+    w_bm25_title_buying: float | None = None
+    w_bm25_title_browsing: float | None = None
+    w_bm25_title_uncertain: float | None = None
     w_bm25_features: float = 0.300
     w_bm25_categories: float = 0.220
     w_dense: float = 0.180
@@ -131,10 +144,39 @@ class RankingConfig:
     w_phrase_title: float = 0.320
     w_phrase_features: float = 0.520
     w_phrase_categories: float = 0.240
+
+    # Constraint spans matched IN FULL, vs `phrase_*` which measures bigram
+    # overlap and cannot distinguish "3 of 4 spans" from "all 4". The
+    # conjunction is the discriminative part: on public_0092 the four disclosed
+    # spans cut 284 candidates to 2, while each alone matches 13-41%.
+    # Default 0.0 -- inert until tuned, so the incumbent is exactly recoverable.
+    w_span_coverage: float = 0.0
+    w_span_all: float = 0.0
     w_coverage: float = 0.300
+
+    # Penalise lexical confidence that is not backed by whole-query coverage.
+    # These interaction weights default to zero so existing configurations are
+    # byte-for-byte equivalent until an evaluated setting opts in.
+    w_title_low_coverage: float = 0.0
+    w_popularity_low_coverage: float = 0.0
 
     w_profile_affinity: float = 0.030
     w_category_focus: float = 0.070
+
+    # Same per-intent override pattern as w_fused_*, `None` falls back to the
+    # shared default above. Both are "soft, no-constraint-needed" signals --
+    # the same rationale that justifies dropping `fused` for buying/uncertain
+    # (real stated facts are better evidence) argues these should matter MORE
+    # for browsing specifically, where no such facts exist to lean on instead.
+    # Untested until given their own knob; a blanket global raise was already
+    # shown to do effectively nothing, which is a different question from
+    # "does it help browsing specifically while leaving buying/uncertain alone".
+    w_profile_affinity_buying: float | None = None
+    w_profile_affinity_browsing: float | None = None
+    w_profile_affinity_uncertain: float | None = None
+    w_category_focus_buying: float | None = None
+    w_category_focus_browsing: float | None = None
+    w_category_focus_uncertain: float | None = None
 
     # Diversity: MMR on positions 2-10, browsing only. Position 1 is never
     # diversified -- every demotion of the true target costs MRR directly.
@@ -193,6 +235,15 @@ class DialogueConfig:
     # (the customer reveals at most two spans per turn), but with diminishing
     # returns. Each prior ask multiplies the expected yield by this.
     repeat_ask_decay: float = 0.45
+
+    # How much an overridden constraint span's weight decays once superseded
+    # (state.observe's override_decay). It stays in the query, just quieter.
+    override_decay: float = 0.25
+
+    # Per-turn boost applied to later constraint disclosures over earlier ones
+    # (state.query's recency_bonus) -- a customer's most recent statement is
+    # more informative than their opening line.
+    recency_bonus: float = 0.15
 
 
 @dataclass

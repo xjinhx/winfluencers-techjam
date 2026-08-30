@@ -56,6 +56,8 @@ SEARCH_SPACE: list[tuple[str, str, list[float]]] = [
     ("priors", "w_has_price", [0.0, 0.04, 0.09]),
     ("priors", "w_n_features", [0.0, 0.03, 0.07]),
     ("constraints", "gender_violated", [0.0, -0.12, -0.23, -0.4]),
+    ("dialogue", "override_decay", [0.0, 0.15, 0.25, 0.4, 0.6]),
+    ("dialogue", "recency_bonus", [0.0, 0.08, 0.15, 0.25, 0.4]),
 ]
 
 QUICK = {

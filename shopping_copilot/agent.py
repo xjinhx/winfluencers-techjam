@@ -91,9 +91,13 @@ class Agent:
         # The extractor is shared, not rebuilt: its brand and category
         # vocabularies are derived from the whole catalog and are session-
         # independent. Only the accumulated slots live on the state.
+        try:
+            profile = ShopperProfile.parse(user_profile)
+        except Exception:  # pragma: no cover - last-resort guard, mirrors respond()
+            profile = ShopperProfile.parse(None)
         self.sessions[session_id] = ShoppingState(
             session_id=session_id,
-            profile=ShopperProfile.parse(user_profile),
+            profile=profile,
             extractor=self.extractor,
         )
 
@@ -119,10 +123,15 @@ class Agent:
     def _respond(self, state: ShoppingState, user_message: str, turn: int, top_k: int) -> dict:
         retrieval = self.config.retrieval
 
-        state.observe(user_message, turn)
+        state.observe(user_message, turn, override_decay=self.config.dialogue.override_decay)
         decision = route(state, self.config.dialogue)
 
-        queries = state.query()
+        queries = state.query(
+            recency_bonus=self.config.dialogue.recency_bonus,
+            term_commonness=self.lexical.commonness,
+            commonness_penalty_strength=retrieval.constraint_commonness_penalty,
+            max_df_ratio=retrieval.max_df_ratio,
+        )
         lexical_mixture, per_field = self.lexical.search(queries, retrieval.per_field_depth)
 
         # The dense route reads the surface text, not the term list: character
@@ -157,6 +166,7 @@ class Agent:
             query_terms=state.active_terms(),
             query_bigrams=state.active_bigrams(),
             category_terms=set(_tokens(state.category_phrase)),
+            constraint_spans=state.active_spans(),
             turn=turn,
             intent=decision.intent,
         )

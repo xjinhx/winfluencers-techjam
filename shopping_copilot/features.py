@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from .catalog import Catalog, Product
 from .profile import ShopperProfile
-from .structured import SATISFIED, VIOLATED, Constraints, evaluate_all
+from .structured import SATISFIED, UNKNOWN, VIOLATED, Constraints, evaluate_all
 
 CONSTRAINT_DIMENSIONS = ("gender", "brand", "category", "price", "material", "color")
 
@@ -42,13 +42,18 @@ FEATURE_NAMES: tuple[str, ...] = (
     "phrase_title",
     "phrase_features",
     "phrase_categories",
+    "span_coverage",
+    "span_all",
     "coverage",
+    "title_low_coverage",
+    "popularity_low_coverage",
     "popularity",
     "quality",
     "has_price",
     "has_description",
     "n_features_norm",
     *[f"{dim}_{outcome}" for dim in CONSTRAINT_DIMENSIONS for outcome in ("satisfied", "violated")],
+    *[f"{dim}_unknown" for dim in CONSTRAINT_DIMENSIONS],
     "profile_affinity",
     "category_focus",
 )
@@ -73,6 +78,7 @@ class ScoringContext:
     query_terms: set[str]
     query_bigrams: set[str]
     category_terms: set[str]
+    constraint_spans: tuple[str, ...] = ()
     turn: int = 1
     intent: str = "buying"
 
@@ -95,16 +101,30 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
 
     coverage = _overlap(ctx.query_terms, searchable)
     category_focus = _overlap(ctx.category_terms, title_tokens | category_tokens)
+    bm25_title = ctx.per_field.get("title", {}).get(doc_id, 0.0)
 
     phrase_title = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "title"))
     phrase_features = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "features"))
     phrase_categories = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "categories"))
 
+    # Constraint spans matched IN FULL. `phrase_*` above measures bigram
+    # overlap, which cannot tell "3 of 4 spans matched" from "all 4" -- and the
+    # conjunction is what discriminates: on public_0092 the four disclosed spans
+    # narrow 284 candidates to 2, while each one alone matches 13-41% of them.
+    spans = ctx.constraint_spans
+    if spans:
+        matched = sum(1 for s in spans if s in product.search_blob)
+        span_coverage = matched / len(spans)
+        span_all = 1.0 if matched == len(spans) else 0.0
+    else:
+        span_coverage = 0.0
+        span_all = 0.0
+
     outcomes = evaluate_all(product, ctx.constraints)
 
     vector = [
         ctx.fused.get(doc_id, 0.0),
-        ctx.per_field.get("title", {}).get(doc_id, 0.0),
+        bm25_title,
         ctx.per_field.get("features", {}).get(doc_id, 0.0),
         ctx.per_field.get("categories", {}).get(doc_id, 0.0),
         ctx.per_field.get("description", {}).get(doc_id, 0.0),
@@ -113,7 +133,11 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
         phrase_title,
         phrase_features,
         phrase_categories,
+        span_coverage,
+        span_all,
         coverage,
+        bm25_title * (1.0 - coverage),
+        product.popularity * (1.0 - coverage),
         product.popularity,
         product.quality,
         1.0 if product.has_price else 0.0,
@@ -126,6 +150,8 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
         outcome = outcomes[dimension]
         vector.append(1.0 if outcome == SATISFIED else 0.0)
         vector.append(1.0 if outcome == VIOLATED else 0.0)
+    for dimension in CONSTRAINT_DIMENSIONS:
+        vector.append(1.0 if outcomes[dimension] == UNKNOWN else 0.0)
     vector.append(ctx.profile.affinity(product.title, product.features_text))
     vector.append(category_focus)
     return vector

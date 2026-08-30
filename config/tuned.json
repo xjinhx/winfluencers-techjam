@@ -13,8 +13,9 @@
     "w_store": 0.35,
     "max_df_ratio": 0.35,
     "max_query_terms": 48,
+    "constraint_commonness_penalty": 0.3,
     "fusion_alpha": 0.78,
-    "per_field_depth": 220,
+    "per_field_depth": 800,
     "candidate_depth": 200,
     "rerank_depth": 200,
     "enable_dense": true,
@@ -52,6 +53,7 @@
   "ranking": {
     "w_fused": 1.0,
     "w_bm25_title": 0.26,
+    "w_bm25_title_buying": 0.18,
     "w_bm25_features": 0.3,
     "w_bm25_categories": 0.11,
     "w_dense": 0.18,
@@ -59,13 +61,17 @@
     "w_phrase_features": 0.13,
     "w_phrase_categories": 0.5,
     "w_coverage": 0.6,
-    "w_profile_affinity": 0.03,
+    "w_title_low_coverage": -0.2,
+    "w_popularity_low_coverage": -0.4,
+    "w_profile_affinity": 0.06,
     "w_category_focus": 0.0,
     "enable_mmr": false,
     "mmr_lambda": 0.85,
     "mmr_start_position": 2,
     "w_fused_buying": 0.0,
-    "w_fused_uncertain": 0.0
+    "w_fused_uncertain": 0.0,
+    "w_span_all": 0.4,
+    "w_span_coverage": 0.0
   },
   "dialogue": {
     "intent_buying_threshold": 0.65,

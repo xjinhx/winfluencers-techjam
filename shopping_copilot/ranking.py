@@ -26,7 +26,11 @@ from typing import Protocol
 
 from .catalog import Product
 from .config import ConstraintConfig, PriorConfig, RankingConfig
-from .features import FEATURE_INDEX, FEATURE_NAMES, ScoringContext, extract
+from .features import FEATURE_NAMES, ScoringContext, extract
+
+# Feature names that may carry a different weight per routed intent, via a
+# `w_{feature}_{intent}` field on RankingConfig (see Ranker.__init__).
+INTENT_OVERRIDABLE = ("fused", "bm25_title", "profile_affinity", "category_focus")
 
 
 class ScoringModel(Protocol):
@@ -62,9 +66,9 @@ def build_linear_weights(
 ) -> dict[str, float]:
     """Assemble the named weight map from config.
 
-    `*_unknown` weights are applied separately in `Ranker.score_candidate`
-    because 'unknown' is the absence of both one-hot columns, not a column of
-    its own.
+    `*_unknown` weights are ordinary columns here, same as `*_satisfied` /
+    `*_violated` -- folded in so a learned model sees the penalty as a
+    feature instead of a hand-tuned constant applied outside the model.
     """
     weights: dict[str, float] = {
         "fused": ranking.w_fused,
@@ -77,7 +81,11 @@ def build_linear_weights(
         "phrase_title": ranking.w_phrase_title,
         "phrase_features": ranking.w_phrase_features,
         "phrase_categories": ranking.w_phrase_categories,
+        "span_coverage": ranking.w_span_coverage,
+        "span_all": ranking.w_span_all,
         "coverage": ranking.w_coverage,
+        "title_low_coverage": ranking.w_title_low_coverage,
+        "popularity_low_coverage": ranking.w_popularity_low_coverage,
         "popularity": priors.w_log_rating_number,
         "quality": priors.w_average_rating,
         "has_price": priors.w_has_price,
@@ -89,6 +97,7 @@ def build_linear_weights(
     for dimension in ("gender", "brand", "category", "price", "material", "color"):
         weights[f"{dimension}_satisfied"] = getattr(constraints, f"{dimension}_satisfied")
         weights[f"{dimension}_violated"] = getattr(constraints, f"{dimension}_violated")
+        weights[f"{dimension}_unknown"] = getattr(constraints, f"{dimension}_unknown")
     return weights
 
 
@@ -110,33 +119,29 @@ class Ranker:
         )
         # One model per routed intent, built only when the caller did not supply
         # its own scorer -- a GBDT dropped into `model` keeps full control of the
-        # vector rather than having `fused` rewritten underneath it.
+        # vector rather than having features rewritten underneath it. Any of
+        # INTENT_OVERRIDABLE may differ per intent via a `w_{feature}_{intent}`
+        # config field (None falls back to the shared default); all applicable
+        # overrides for one intent are merged into a single LinearModel for it.
         self.intent_models: dict[str, ScoringModel] = {}
         if model is None:
+            base_weights = build_linear_weights(ranking, priors, constraints)
             for intent in ("buying", "browsing", "uncertain"):
-                override = getattr(ranking, f"w_fused_{intent}", None)
-                if override is None or override == ranking.w_fused:
-                    continue
-                weights = build_linear_weights(ranking, priors, constraints)
-                weights["fused"] = override
-                self.intent_models[intent] = LinearModel(weights)
-        self._unknown_penalty = {
-            dimension: getattr(constraints, f"{dimension}_unknown")
-            for dimension in ("gender", "brand", "category", "price", "material", "color")
-        }
+                weights: dict[str, float] | None = None
+                for feature in INTENT_OVERRIDABLE:
+                    default = getattr(ranking, f"w_{feature}")
+                    override = getattr(ranking, f"w_{feature}_{intent}", None)
+                    if override is None or override == default:
+                        continue
+                    if weights is None:
+                        weights = dict(base_weights)
+                    weights[feature] = override
+                if weights is not None:
+                    self.intent_models[intent] = LinearModel(weights)
 
     def score_candidate(self, product: Product, ctx: ScoringContext) -> tuple[float, list[float]]:
         vector = extract(product, ctx)
         score = self.intent_models.get(ctx.intent, self.model).score(vector)
-        # 'unknown' is neither column set. Priced here so the feature vector
-        # stays a clean one-hot-minus-one for a future tree model.
-        for dimension, penalty in self._unknown_penalty.items():
-            if not penalty:
-                continue
-            satisfied = vector[FEATURE_INDEX[f"{dimension}_satisfied"]]
-            violated = vector[FEATURE_INDEX[f"{dimension}_violated"]]
-            if satisfied == 0.0 and violated == 0.0:
-                score += penalty
         return score, vector
 
     def rank(

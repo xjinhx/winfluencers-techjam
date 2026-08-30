@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from .catalog import GENDER_CANON, Catalog, Product
+from .text import tokenize
 
 SATISFIED = "satisfied"
 VIOLATED = "violated"
@@ -31,6 +32,14 @@ UNKNOWN = "unknown"
 # changed. Shared with state.py so an override can scope its reset to only
 # the attribute(s) the customer actually re-stated.
 SOFT_FIELDS = frozenset({"materials", "colors", "sizes", "use_cases", "brands", "price"})
+
+# categories/gender are ordinarily excluded from clear_soft's default reset --
+# they describe *what kind of thing* is being bought, which is assumed not to
+# change on override. That assumption breaks when the override IS a category
+# change (e.g. "actually, a shirt instead of shoes"). CLEARABLE_FIELDS is the
+# wider set an override may explicitly target when it positively re-states a
+# new value for one of these -- never used as part of the blanket fallback.
+CLEARABLE_FIELDS = SOFT_FIELDS | {"categories", "gender"}
 
 # Mirrors the vocabulary the simulated customer actually uses.
 MATERIALS = (
@@ -56,6 +65,49 @@ USE_CASES = (
 
 MATERIAL_RE = re.compile(r"\b(" + "|".join(MATERIALS) + r")\b", re.I)
 COLOR_RE = re.compile(r"\b(" + "|".join(COLORS) + r")\b", re.I)
+
+# "faux leather" and "faux suede" are not leather or suede -- a bare substring
+# match treats them identically to the genuine material. Measured against the
+# catalog: 18.4% of "leather" mentions and 17.8% of "suede" mentions carry one
+# of these qualifiers, versus <1% for every other material -- and "synthetic
+# rubber" is a real material category, not a euphemism, which is why this is
+# scoped to these two materials rather than applied by analogy to all of them.
+QUALIFIABLE_MATERIALS = frozenset({"leather", "suede"})
+_FAKE_QUALIFIER_WORDS = (
+    "faux", "synthetic", "pu", "vegan", "artificial",
+    "manmade", "man-made", "imitation", "fake",
+)
+_FAKE_MATERIAL_RE = {
+    material: re.compile(
+        r"\b(" + "|".join(_FAKE_QUALIFIER_WORDS) + r")[\s-]+" + material + r"\b", re.I
+    )
+    for material in QUALIFIABLE_MATERIALS
+}
+
+# The reverse case: words other than the bare material name that also mean
+# "genuine" for that material, so a listing that only says "cowhide" still
+# satisfies a customer who said "leather". Each is catalog-verified at a real
+# volume (genuine leather 559, full grain 263+208, cowhide 155, sheepskin 122,
+# lambskin 60, nappa 47, calfskin 47, top grain 43+12 -- in a 50k-row catalog),
+# not guessed. "leather" itself stays in the set but is handled separately
+# below, since the bare word also appears inside "faux leather".
+GENUINE_MATERIAL_SYNONYMS: dict[str, frozenset[str]] = {
+    "leather": frozenset({
+        "genuine leather", "cowhide", "sheepskin", "lambskin",
+        "nappa", "calfskin", "full grain", "full-grain", "top grain", "top-grain",
+    }),
+}
+
+# How a fake-only mention (e.g. "faux leather" with no genuine mention
+# anywhere in title/features/description) scores against a customer who asked
+# for the material by name. "unknown" is the measured-safe default: 9 of the
+# 200 public targets are THEMSELVES only faux/PU leather, because the harness
+# derives the customer's stated material from the target's own listing with
+# the same naive match this guards against -- "violated" would penalise the
+# correct answer in exactly those sessions. "off" disables the genuine/fake
+# distinction entirely (a fake-only mention counts as SATISFIED, matching the
+# pre-fix behaviour); kept only so the three modes can be A/B compared.
+FAKE_MATERIAL_MODE = "unknown"  # "off" | "unknown" | "violated"
 SIZE_RE = re.compile(r"\b(" + "|".join(SIZES) + r")\b", re.I)
 USE_CASE_RE = re.compile(r"\b(" + "|".join(USE_CASES) + r")\b", re.I)
 PRICE_RE = re.compile(r"(?:\$|under|below|less than|budget around|up to)\s*\$?\s*(\d+(?:\.\d+)?)", re.I)
@@ -107,14 +159,18 @@ class Constraints:
 
     def clear_soft(self, only: set[str] | None = None) -> None:
         """Drop preference-shaped slots on an intent override, keeping the
-        ones that describe *what kind of thing* is being bought.
+        ones that describe *what kind of thing* is being bought -- unless
+        `only` explicitly says otherwise.
 
         `only` scopes the reset to specific slot names (as returned by
         `filled_slots()`) -- e.g. an override that only re-states color
         should not also wipe an already-disclosed budget. Pass None (the
-        default) for the old unconditional behaviour: clear every soft slot.
+        default) for the old unconditional behaviour: clear every soft slot,
+        but never `categories`/`gender` -- those are only ever cleared when
+        a caller has positively identified a new value for them (see
+        CLEARABLE_FIELDS), never as part of this blanket fallback.
         """
-        fields = SOFT_FIELDS if only is None else (only & SOFT_FIELDS)
+        fields = SOFT_FIELDS if only is None else (only & CLEARABLE_FIELDS)
         if "materials" in fields:
             self.materials.clear()
         if "colors" in fields:
@@ -127,6 +183,10 @@ class Constraints:
             self.brands.clear()
         if "price" in fields:
             self.price_max = None
+        if "categories" in fields:
+            self.categories.clear()
+        if "gender" in fields:
+            self.gender = None
 
 
 class BrandVocabulary:
@@ -172,9 +232,16 @@ class ConstraintExtractor:
         self.catalog = catalog
         self.brands = BrandVocabulary(catalog)
         self.category_vocab: dict[str, str] = {}
+        # Stemmed tokens per vocab level, so "shirt" (customer, singular)
+        # still matches a catalog level stored as "Shirts" (plural) -- a
+        # plain substring check only works when one word happens to contain
+        # the other, which depends on which side is plural by luck.
+        self._category_tokens: dict[str, tuple[str, ...]] = {}
         for product in catalog.products:
             for level in product.category_path:
-                self.category_vocab.setdefault(level.lower(), level)
+                key = level.lower()
+                self.category_vocab.setdefault(key, level)
+                self._category_tokens.setdefault(key, tuple(tokenize(level)))
 
     def update(self, constraints: Constraints, text: str) -> Constraints:
         lowered = text.lower()
@@ -192,8 +259,9 @@ class ConstraintExtractor:
         constraints.sizes |= {s.lower() for s in SIZE_RE.findall(text)}
         constraints.use_cases |= {u.lower() for u in USE_CASE_RE.findall(text)}
 
-        for level in self.category_vocab:
-            if len(level) > 3 and level in lowered:
+        text_tokens = set(tokenize(lowered))
+        for level, level_tokens in self._category_tokens.items():
+            if len(level) > 3 and level_tokens and set(level_tokens) <= text_tokens:
                 constraints.categories.add(level)
 
         price = PRICE_RE.search(text)
@@ -260,24 +328,73 @@ def _check_text_set(text: str, wanted: set[str]) -> str:
     return UNKNOWN
 
 
+def _searchable_text(product: Product) -> str:
+    """title + features + description, lowercased.
+
+    Every text-based constraint check searches all three -- `description` was
+    previously left out here (unlike the lexical/dense retrieval routes, which
+    already index it), so a material/color mentioned only in the description
+    silently read as UNKNOWN instead of SATISFIED.
+    """
+    return (
+        product.title + " " + product.features_text + " " + product.description_text
+    ).lower()
+
+
+def _bare_word_is_genuine(word: str, lowered_text: str) -> bool:
+    """True if at least one occurrence of `word` is not a faux/synthetic qualifier.
+
+    Only meaningful for QUALIFIABLE_MATERIALS -- everything else has no known
+    "fake" reading, so any occurrence counts.
+    """
+    if word not in QUALIFIABLE_MATERIALS:
+        return word in lowered_text
+    total = len(re.findall(r"\b" + word + r"\b", lowered_text))
+    if total == 0:
+        return False
+    qualified = len(_FAKE_MATERIAL_RE[word].findall(lowered_text))
+    return total > qualified
+
+
 def check_material(product: Product, constraints: Constraints) -> str:
-    return _check_text_set(
-        product.title + " " + product.features_text, constraints.materials
-    )
+    """SATISFIED on a genuine mention (bare word or a GENUINE_MATERIAL_SYNONYMS
+    entry); otherwise a fake-only mention is scored per FAKE_MATERIAL_MODE;
+    otherwise UNKNOWN (never guessed VIOLATED from silence -- see module
+    docstring)."""
+    wanted = constraints.materials
+    if not wanted:
+        return UNKNOWN
+    lowered = _searchable_text(product)
+    fake_only = False
+    for word in wanted:
+        synonyms = GENUINE_MATERIAL_SYNONYMS.get(word, frozenset())
+        if any(synonym in lowered for synonym in synonyms):
+            return SATISFIED
+        if _bare_word_is_genuine(word, lowered):
+            return SATISFIED
+        if word in QUALIFIABLE_MATERIALS and word in lowered:
+            fake_only = True
+    if fake_only:
+        if FAKE_MATERIAL_MODE == "off":
+            return SATISFIED
+        if FAKE_MATERIAL_MODE == "violated":
+            return VIOLATED
+        return UNKNOWN
+    return UNKNOWN
 
 
 def check_color(product: Product, constraints: Constraints) -> str:
-    return _check_text_set(
-        product.title + " " + product.features_text, constraints.colors
-    )
+    return _check_text_set(_searchable_text(product), constraints.colors)
 
 
 def evaluate_all(product: Product, constraints: Constraints) -> dict[str, str]:
     """Three-way outcome per constraint dimension.
 
-    Note what is missing: nothing here returns "drop this candidate". Material
-    and colour resolve to SATISFIED or UNKNOWN and never VIOLATED, because
-    absence of the word in sparse copy is not evidence of conflict.
+    Note what is missing: nothing here returns "drop this candidate". Colour
+    resolves to SATISFIED or UNKNOWN and never VIOLATED, because absence of
+    the word in sparse copy is not evidence of conflict. Material is the same
+    except for a fake-material mention (see FAKE_MATERIAL_MODE), which is the
+    one case with positive contrary evidence rather than mere silence.
     """
     return {
         "gender": check_gender(product, constraints),

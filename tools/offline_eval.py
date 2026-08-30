@@ -4,11 +4,8 @@
 those rows to the public labels and replays the evaluator's ranking decision,
 so a scoring change can be measured in seconds instead of a 3m08s live run.
 
-Reproducing the live ranker takes three details that are easy to miss:
+Reproducing the live ranker takes two details that are easy to miss:
 
-  * The unknown-penalty in `ranking.py` is applied *outside* the model. Three of
-    the six dimensions are non-zero under `config/tuned.json`, so scoring the
-    vector with `LinearModel` alone does not reproduce the ordering.
   * MMR never fires (`enable_mmr = False`), so no diversification to replay.
   * `best_rank` is not the rank in the full pool. The evaluator takes the first
     turn where the target appears in the returned top-10, and for
@@ -27,13 +24,11 @@ from collections import defaultdict
 from pathlib import Path
 
 from shopping_copilot.config import Config
-from shopping_copilot.features import FEATURE_INDEX
-from shopping_copilot.ranking import LinearModel, build_linear_weights
+from shopping_copilot.ranking import INTENT_OVERRIDABLE, LinearModel, build_linear_weights
 
 TOP_K = 10
 MAX_TURNS = 10
 DEFAULT_OVERRIDE_TURN = 3
-DIMENSIONS = ("gender", "brand", "category", "price", "material", "color")
 
 
 def load_labels(public_set: str | Path) -> list[dict]:
@@ -107,38 +102,34 @@ def join_by_order(order: list[str], labels: list[dict]) -> dict[str, dict]:
 class ReplayScorer:
     """The live scoring path, reconstructed from a config alone.
 
-    Mirrors `Ranker.score_candidate`: model score first, then the additive
-    unknown-penalty for any dimension the candidate neither satisfies nor
-    violates.
+    Mirrors `Ranker.score_candidate`. The unknown-penalty is folded into
+    `build_linear_weights()` as ordinary `{dimension}_unknown` columns
+    (see `features.py`/`ranking.py`), so `LinearModel.score()` alone
+    reproduces the live score -- no separate post-hoc adjustment here.
     """
 
     def __init__(self, config: Config) -> None:
         base = build_linear_weights(config.ranking, config.priors, config.constraints)
         self.model = LinearModel(base)
-        # Mirrors `Ranker.intent_models`: a per-intent fusion weight, so a replay
-        # of an intent-conditional config ranks the way the live agent does.
+        # Mirrors `Ranker.intent_models`: any of INTENT_OVERRIDABLE may carry
+        # a per-intent weight, so a replay of an intent-conditional config
+        # ranks the way the live agent does.
         self.intent_models: dict[str, LinearModel] = {}
         for intent in ("buying", "browsing", "uncertain"):
-            override = getattr(config.ranking, f"w_fused_{intent}", None)
-            if override is None or override == config.ranking.w_fused:
-                continue
-            weights = dict(base)
-            weights["fused"] = override
-            self.intent_models[intent] = LinearModel(weights)
-        self.penalties = {
-            dimension: getattr(config.constraints, f"{dimension}_unknown")
-            for dimension in DIMENSIONS
-        }
-        self.penalties = {d: p for d, p in self.penalties.items() if p}
+            weights: dict[str, float] | None = None
+            for feature in INTENT_OVERRIDABLE:
+                default = getattr(config.ranking, f"w_{feature}")
+                override = getattr(config.ranking, f"w_{feature}_{intent}", None)
+                if override is None or override == default:
+                    continue
+                if weights is None:
+                    weights = dict(base)
+                weights[feature] = override
+            if weights is not None:
+                self.intent_models[intent] = LinearModel(weights)
 
     def __call__(self, vector: list[float], intent: str | None = None) -> float:
-        score = self.intent_models.get(intent, self.model).score(vector)
-        for dimension, penalty in self.penalties.items():
-            satisfied = vector[FEATURE_INDEX[f"{dimension}_satisfied"]]
-            violated = vector[FEATURE_INDEX[f"{dimension}_violated"]]
-            if satisfied == 0.0 and violated == 0.0:
-                score += penalty
-        return score
+        return self.intent_models.get(intent, self.model).score(vector)
 
 
 def rank_turn(rows: list[dict], score_fn) -> list[str]:

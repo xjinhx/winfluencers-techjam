@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .profile import ShopperProfile
-from .structured import SOFT_FIELDS, ConstraintExtractor, Constraints
+from .structured import CLEARABLE_FIELDS, ConstraintExtractor, Constraints
 from .text import bigrams, tokenize
 
 # Phrases the simulator wraps around real content. Stripped before tokenising.
@@ -77,6 +78,11 @@ _LEAD_IN_RE = re.compile(
 # Scanning that half for constraints would re-introduce the very thing the
 # customer just overrode, so it is stripped before extraction runs.
 _OVERRIDE_CUE_RE = re.compile(r"\binstead of\b|\brather than\b|\bnot\b", re.I)
+
+# Fields treated as "what kind of thing is being bought" -- only trusted as
+# the actual change when they're the ONLY thing an override identifies (see
+# their use in observe()).
+_IDENTITY_FIELDS = frozenset({"categories", "gender"})
 
 
 def _kept_text(text: str) -> str:
@@ -209,7 +215,19 @@ class ShoppingState:
             touched: set[str] = set()
             for text in kept_texts:
                 touched |= _touched_fields(self.extractor, text)
-            touched &= SOFT_FIELDS   # never gender/category -- those are kept regardless
+            touched &= CLEARABLE_FIELDS   # only ever act on recognised slot names
+
+            # categories/gender describe "what kind of thing" is being bought
+            # and the category vocabulary is large and noisy (near-synonyms
+            # like "sneakers" are their own entries alongside "shoes"), so a
+            # sentence that is really just a color/material change often also
+            # incidentally matches a category word. Only trust "category
+            # changed" when it is the ONLY thing the override identifies --
+            # otherwise the mention is almost certainly incidental, and acting
+            # on it would discard a perfectly good, more complete category
+            # anchor (e.g. "running shoes") for a narrower one.
+            if touched and not touched <= _IDENTITY_FIELDS:
+                touched -= _IDENTITY_FIELDS
 
             if touched:
                 # Surgical: only demote spans about the SAME attribute(s) the
@@ -219,6 +237,12 @@ class ShoppingState:
                         span.superseded = True
                         span.weight *= override_decay
                 self.constraints.clear_soft(only=touched)
+                if "categories" in touched:
+                    # category_phrase is re-applied to constraints on every
+                    # turn below (it also drives query() category weighting),
+                    # so leaving the OLD phrase in place would immediately
+                    # re-add the category clear_soft() just removed.
+                    self.category_phrase = " ".join(kept_texts)
             else:
                 # Couldn't tell which attribute changed (no recognisable slot
                 # in the new text) -- fall back to the old blanket reset
@@ -243,13 +267,28 @@ class ShoppingState:
             self.asked_attributes.append(attribute)
 
     # -- query construction ----------------------------------------------
-    def query(self, *, recency_bonus: float = 0.15) -> dict[str, list[tuple[str, float]]]:
+    def query(
+        self,
+        *,
+        recency_bonus: float = 0.15,
+        term_commonness: Callable[[str], float] | None = None,
+        commonness_penalty_strength: float = 0.0,
+        max_df_ratio: float = 0.35,
+    ) -> dict[str, list[tuple[str, float]]]:
         """Per-field weighted term lists.
 
         Field routing is the point. The category phrase is the customer naming
         a taxonomy node, so it belongs against `categories` and `title`, not
         against 400 words of marketing copy. Constraint spans are quoted product
         copy, so they belong against `features` and `title`.
+
+        `term_commonness`/`commonness_penalty_strength` soft-damp constraint
+        terms that are near-universal catalog boilerplate (e.g. "manmade
+        sole", "platform measures approximately") -- disclosed verbatim from
+        the target's own listing, they otherwise earn full query weight and
+        can pull in thousands of unrelated competing documents. Never applied
+        to `category_terms`: the category phrase must keep full routing
+        weight regardless of how common its words are.
         """
         category_terms = [
             term for term in tokenize(self.category_phrase)
@@ -263,7 +302,15 @@ class ShoppingState:
             for term in tokenize(span.text):
                 if term in BOILERPLATE_TERMS:
                     continue
-                constraint_terms[term] = max(constraint_terms.get(term, 0.0), weight)
+                term_weight = weight
+                if term_commonness is not None and commonness_penalty_strength > 0:
+                    df_ratio = term_commonness(term)
+                    raw_damping = (
+                        max(0.0, 1.0 - df_ratio / max_df_ratio) if max_df_ratio > 0 else 1.0
+                    )
+                    damping = 1.0 - commonness_penalty_strength * (1.0 - raw_damping)
+                    term_weight *= damping
+                constraint_terms[term] = max(constraint_terms.get(term, 0.0), term_weight)
 
         category_weighted = [(term, 1.0) for term in dict.fromkeys(category_terms)]
         constraint_weighted = sorted(
@@ -295,6 +342,24 @@ class ShoppingState:
             out.update(t for t in tokenize(span.text) if t not in BOILERPLATE_TERMS)
         out.update(t for t in tokenize(self.category_phrase) if t not in BOILERPLATE_TERMS)
         return out
+
+    def active_spans(self) -> tuple[str, ...]:
+        """Live constraint text kept WHOLE, not tokenised.
+
+        The customer quotes the target's own copy verbatim, so the full span is
+        far more discriminative than its parts: "95% Polyester, 5% Spandex"
+        matches 5.3% of a category where "polyester" alone matches 41.2%.
+        Tokenising it -- which `active_terms` and `active_bigrams` both do --
+        throws that away.
+        """
+        out: list[str] = []
+        for span in self.spans:
+            if span.superseded:
+                continue
+            text = " ".join(str(span.text).lower().split())
+            if len(text) > 3:
+                out.append(text)
+        return tuple(dict.fromkeys(out))
 
     def active_bigrams(self) -> set[str]:
         """Ordered bigrams of live constraint text.
