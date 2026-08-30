@@ -42,6 +42,8 @@ FEATURE_NAMES: tuple[str, ...] = (
     "phrase_title",
     "phrase_features",
     "phrase_categories",
+    "span_coverage",
+    "span_all",
     "coverage",
     "title_low_coverage",
     "popularity_low_coverage",
@@ -76,6 +78,7 @@ class ScoringContext:
     query_terms: set[str]
     query_bigrams: set[str]
     category_terms: set[str]
+    constraint_spans: tuple[str, ...] = ()
     turn: int = 1
     intent: str = "buying"
 
@@ -104,6 +107,19 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
     phrase_features = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "features"))
     phrase_categories = _overlap(ctx.query_bigrams, catalog.bigram_set(product, "categories"))
 
+    # Constraint spans matched IN FULL. `phrase_*` above measures bigram
+    # overlap, which cannot tell "3 of 4 spans matched" from "all 4" -- and the
+    # conjunction is what discriminates: on public_0092 the four disclosed spans
+    # narrow 284 candidates to 2, while each one alone matches 13-41% of them.
+    spans = ctx.constraint_spans
+    if spans:
+        matched = sum(1 for s in spans if s in product.search_blob)
+        span_coverage = matched / len(spans)
+        span_all = 1.0 if matched == len(spans) else 0.0
+    else:
+        span_coverage = 0.0
+        span_all = 0.0
+
     outcomes = evaluate_all(product, ctx.constraints)
 
     vector = [
@@ -117,6 +133,8 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
         phrase_title,
         phrase_features,
         phrase_categories,
+        span_coverage,
+        span_all,
         coverage,
         bm25_title * (1.0 - coverage),
         product.popularity * (1.0 - coverage),

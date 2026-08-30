@@ -166,6 +166,7 @@ class Agent:
             query_terms=state.active_terms(),
             query_bigrams=state.active_bigrams(),
             category_terms=set(_tokens(state.category_phrase)),
+            constraint_spans=state.active_spans(),
             turn=turn,
             intent=decision.intent,
         )

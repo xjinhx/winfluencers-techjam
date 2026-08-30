@@ -69,7 +69,9 @@
     "mmr_lambda": 0.85,
     "mmr_start_position": 2,
     "w_fused_buying": 0.0,
-    "w_fused_uncertain": 0.0
+    "w_fused_uncertain": 0.0,
+    "w_span_all": 0.4,
+    "w_span_coverage": 0.0
   },
   "dialogue": {
     "intent_buying_threshold": 0.65,

@@ -366,103 +366,176 @@ patterns. `0.30` was chosen over the higher plateau values as the more
 conservative choice — it's simultaneously where train peaks and where
 holdout's plateau begins, not an arbitrary pick from a flat region.
 
-**Full 200-session result, adopted into `config/tuned.json`:**
-`TechnicalScore` 0.876342 → **0.881716** (+0.0054). **HR@10 0.985 → 0.990
-(3 misses → 2)**, MRR 0.679141 → 0.687054, MTTC 1.995 → 1.97,
-`target_never_in_pool` 3 → 2. `offline_eval` confirms 200/200 session
-agreement. 32/32 tests pass.
+**The defect.** The customer quotes the target's own copy verbatim, and the
+agent dissolved those quotes into tokens. `"95% Polyester, 5% Spandex"` became
+`{95, polyester, 5, spandex}`, which BM25 matches against 41% of a category —
+where the intact phrase matches **5.3%**. The only survivor of the span
+structure was `phrase_*` (ordered-bigram *overlap*, weight 0.13), and overlap
+**cannot distinguish "3 of 4 spans matched" from "all 4"** because both can
+produce identical bigram sets. The conjunction was not representable at all.
 
-**`public_0100` itself: confirmed fixed, and cleanly** — turn 3, rank 1
-(the best possible reciprocal rank). This is the specific session the fix
-was designed around, and it worked exactly as diagnosed, not
-coincidentally.
+**Why the conjunction is the whole game — `public_0092`, disclosed in order:**
 
-**Bonus check (not diagnostic):** `public_0092` and `public_0137` are
-still misses at this value — unaffected, consistent with them not having
-been diagnosed as sharing this mechanism.
+```
+after           constraint                     survivors   target still in?
+turn 2          imported                              86         True
+turn 2          button closure                        14         True
+turn 3          polyester                              9         True
+turn 3          95% Polyester, 5% Spandex              2         True
+```
 
-**Not on `main` yet** — this branch (`fix/public-0100-candidate-depth`)
-also carries the earlier, rejected `candidate_depth` experiment (see entry
-below), documented rather than discarded since it's what motivated tracing
-`public_0100` turn-by-turn in the first place, which is what actually found
-this fix.
+284 → 2. **The agent held all four strings by turn 3 and ranked the target
+39th.** Each constraint alone is boilerplate (13-41% of the category); together
+they are nearly unique.
 
-**`public_0100` diagnosed and a targeted fix tested — rejected, and the
-rejection revealed a different, harder problem than `per_field_depth`
-(2026-08-30, Dylan Huang, branch `fix/public-0100-candidate-depth`):**
+**The fix.** `state.active_spans()` keeps live constraint text whole;
+`Product.search_blob` is a lowercased match surface built once at load;
+`features.py` gains `span_coverage` (fraction matched) and `span_all` (1.0 iff
+*every* span matches). `FEATURE_NAMES` 36 → 38.
 
-**The request:** of the 3 misses remaining after the `per_field_depth`
-fix, root-cause `public_0100` specifically (browsing scenario, target
-`B002OHE4D6`, a men's Dockers leather loafer).
+**Measured, fold A only for selection, fold B once:**
 
-**Diagnosis, traced directly, not guessed:** turn 1's query ("I'm looking
-for Shoes Loafers & Slip-Ons, but I'm still exploring.") already ranks the
-target well inside every per-field cutoff — `categories` rank 23/808,
-`title` rank 312/5355, both comfortably under `per_field_depth=800`. The
-apparent bottleneck at turn 1 was the aggregate fusion cutoff instead:
-uncapped fused rank 294/2417, just outside `candidate_depth=200`.
-Unlike `per_field_depth`, this is squarely `RetrievalConfig.candidate_depth`
-territory — a genuinely different lever from the earlier fix.
+```
+fold A  0.872192 -> 0.883120   (+0.010928)
+fold B  0.880493 -> 0.893253   (+0.012760)     <- gains MORE held-out than fitted
+full    0.876342 -> 0.888187   (+0.011845)
+```
 
-**A real code detail surfaced along the way:** `agent.py` does
-`candidate_ids = top_n(fused, candidate_depth)` then
-`candidate_ids[:rerank_depth]` — since `rerank_depth` currently equals
-`candidate_depth` (200==200), raising one alone does nothing; both must
-move together for the change to take effect at all.
-
-**Tested exactly like the `per_field_depth` fix — grid swept against
-`stratified_halves(seed=7)`, `candidate_depth`/`rerank_depth` moved
-together:**
-
-| depth | train | holdout | 100-session time |
+| scenario | MRR before | after | Δ |
 |---|---|---|---|
-| 200 (baseline) | 0.8722 | 0.8805 | ~9s |
-| 250 | 0.8714 (−0.0008) | 0.8748 (−0.0057) | ~10.5s |
-| 300 | 0.8696 (−0.0026) | 0.8721 (−0.0084) | ~11.3s |
-| 400 | 0.8788 (+0.0067) | 0.8728 (−0.0077) | ~10.8s |
-| 500 | 0.8788 (+0.0067) | 0.8719 (−0.0086) | ~13.1s |
-| 800 | 0.8789 (+0.0067) | 0.8706 (−0.0099) | ~17.7s |
+| intent_override | 0.7972 | 0.8722 | **+0.075** |
+| browsing | 0.5907 | 0.6418 | **+0.051** |
+| buying | 0.7245 | 0.7516 | +0.027 |
+| boundary (n=10) | 0.6700 | 0.5950 | **−0.075** |
 
-**Every single value regressed holdout, monotonically worse at higher
-depths — the same signature as the rejected pairwise-LTR and weight-tuning
-experiments, not the `per_field_depth` result.** Also, unlike
-`per_field_depth`, this one carries a real, growing timing cost (9s → 17.7s
-per 100-session fold at depth 800 — roughly double, since raising
-`rerank_depth` scales the expensive per-candidate feature-extraction +
-scoring path, not just a cheap pre-fusion BM25 cutoff).
+The spread follows the mechanism: browsing and override disclose constraints
+across several turns, so there are spans to conjoin; buying discloses one up
+front and a lone span has no conjunction to exploit.
 
-**Confirmatory check — and this is the important part: `public_0100`
-itself never flips, at any tested depth, including 800.** Traced the full
-10-turn transcript at `candidate_depth=800`: by turn 8 the session's
-top-5 is `Bruno Marc Men's Leather Lined Dress Loafers`, `Stacy Adams
-Men's Flynn Moc-Toe Bit Slip-On Loafer`, `Go Tour Men's Premium Genuine
-Leather Casual Slip-On Loafers` — several genuinely similar, legitimate
-men's leather dress loafers the customer's disclosed constraints
-(material, brand) don't distinguish from the actual target. **This is not
-a pool-depth problem at all once enough turns pass — it's the
-reranker failing to discriminate among several near-identical
-competitors, the same class of problem as the already-investigated (and
-already-rejected, see the LambdaMART/separability entry) rank-2
-reranking problem.** The turn-1 candidate_depth analysis above was real
-and correctly diagnosed turn 1, but doesn't explain why the miss persists
-through turn 10 — a materially incomplete picture that only surfaced by
-tracing the full transcript, not just turn 1.
+**Why this is believed despite +0.0128 being under single-run SE (~0.029).**
+Four independent signatures, none of which the twelve failed attempts had:
+(1) monotone response saturating — 0.05→0.4 improves, 0.8 identical, not a
+jagged peak; (2) fold B > fold A; (3) the metric signature was **predicted in
+writing before the run** (HR@10 flat, MRR up) and came out exact — HR@10 moved
++0.0000 in *every* scenario; (4) `span_coverage` measures **zero** at every
+weight, so the entire effect is the conjunctive bit, which is precisely the
+information that was previously unrepresentable. **Still labelled unverified,
+not proven** — the margin is under SE.
 
-**Rejected. `config/tuned.json` untouched.** Per the same discipline as
-every other experiment this session: a regression on holdout is a reason
-not to ship, not a reason to keep searching for a luckier value.
+**Honest negatives.** Boundary regressed −0.075 MRR, which on n=10 is one
+session falling from about rank 1 to rank 4 — noise, but recorded.
+`w_span_all = 0.4` was selected on fold A, so this carries one fitted
+parameter. `w_span_coverage` stays 0.0.
 
-**Bonus check (not diagnostic):** at `candidate_depth=300`, `public_0092`
-and `public_0137` are also still misses — observed in the same replay,
-not separately diagnosed. Do not treat this as evidence about their root
-cause; they have not been traced the way `public_0095`/`public_0100` were.
+**Why twelve other attempts failed and this did not.** Every one of them
+redistributed weight among features that all measured the same thing — text
+overlap under different names. This added a bit of information the vector did
+not contain: *does this candidate satisfy all of the customer's constraints at
+once*. **When a change fails on holdout, ask whether it was moving weight or
+adding information.**
 
-**What this changes about the remaining-misses picture:** `public_0100`
-is now understood to need a *feature* (something that discriminates
-between very similar men's leather loafers), not a *depth* parameter —
-squarely in the same "needs new information in the vector, not a better
-cutoff or weight" category the rank-2 finding already established.
-`public_0092` and `public_0137` remain genuinely undiagnosed.
+**`public_0092` diagnosed: structurally unwinnable, not a retrieval or ranking
+failure (2026-08-30, He Jinhong).** Closes the "3 misses remain — not diagnosed
+this pass" gap below.
+
+Traced turn by turn with the target forced into the candidate pool:
+
+```
+turn   pool   target in pool   target rank
+   1    280            True            206
+   2    320            True             91
+   3    354            True             39
+ 4-10   354            True             39      <- frozen
+```
+
+Rank improves while constraints are disclosed, then **freezes for seven turns**.
+The cause is that the customer runs out of things to say. `intent_card()` gives
+this target exactly four constraints, and `customer_reply` discloses at most two
+per ask:
+
+```
+[material] polyester                     appears in 41.2% of the category
+[material] 95% Polyester, 5% Spandex     (spandex: 27.5%)
+[feature ] Imported                      appears in 30.3% of the category
+[feature ] Button closure                appears in 13.0% of the category
+```
+
+Two productive questions exhaust the customer; every other attribute returns
+"I don't have an additional preference for X". And what *is* disclosed narrows
+284 pajama sets to roughly a third of them. **The information needed to identify
+this product does not exist anywhere in the session** — the target carries no
+colour, no brand signal, no price, and describes itself in the same words as a
+hundred others.
+
+**Why this matters beyond one session:** both `per_field_depth=800` and the
+category union (below) correctly leave `public_0092` a miss. Neither is broken.
+It belongs in the genuinely-undecidable bucket this file already sizes at ~6
+targets, and it sets a floor on miss-conversion work that is not a tuning
+problem. **Do not spend further effort on it.**
+
+**Category-union candidate injection: mechanism total, score null (2026-08-30,
+He Jinhong).** Measured against the **0.862111** baseline, *before* the
+`per_field_depth` merge — do not compare these deltas to 0.876342.
+
+Hypothesis: the customer names a taxonomy node verbatim in turn 1
+(`coarse_category`, 1,115 distinct values, median pool 8), and the agent was
+treating it as a bag of words. Built `catalog.by_coarse_category` and unioned
+the node's members into the candidate pool.
+
+**The mechanism worked completely** — turn-1 pool membership **80% → 100%**,
+every scenario, 4 real misses converted, MTTC −0.25. **The score did not
+follow:**
+
+| variant | fold A | fold B vs incumbent |
+|---|---|---|
+| union, incumbent weights | +0.0167 | **−0.000271** |
+| union, retuned on fold A (8 params) | +0.0051 | **−0.013863** |
+
+Per-session sign test: 5 better, 11 worse, 184 unchanged. The aggregate is
+positive only because converting 4 misses is worth a lot in HR@10 while the
+dilution cost is spread thinly across more sessions.
+
+**Retuning made it worse, and legibly so.** The tuner cut
+`w_log_rating_number` 0.88 → 0.4, because the union injects candidates *ordered
+by popularity* and weighting popularity again double-counts it. Correct on fold
+A; on fold B that weight was doing real work and MRR collapsed 0.7049 → 0.6420.
+The same double-counting trap as the `fused` signal, arriving by a new route —
+except here the "fix" was the overfit.
+
+**Not adopted.** `category_union_size` defaults to 0. Superseded by
+`per_field_depth: 220 → 800`, which fixes the same defect (target absent from
+the pool) with the same signature (HR@10 up, MRR down, MTTC down) for +0.0142
+via a one-line config change instead of ~115 lines. **Untested:** the union on
+top of `per_field_depth=800`. Expected to fail worse — its failure mode is MRR
+dilution and 800 already widens the pool — but that is a prediction, not a
+measurement.
+
+**Withholding recommendations while asking: mechanism real, cost dominates
+(2026-08-30, He Jinhong).** Also measured against **0.862111**.
+
+`best_rank` is first-hit-in-top-10 and the evaluator **breaks on first hit**, so
+recommending early locks in whatever rank you have. `recommend_on_ask_turns`
+was `True` and had never been tuned (`SEARCH_SPACE` holds only floats).
+
+| config | HR@10 | MRR | MTTC | Score |
+|---|---|---|---|---|
+| baseline | 0.960 | 0.6897 | 2.24 | **0.862111** |
+| withhold, budget=2 | 0.810 | 0.6588 | 3.92 | 0.744241 |
+| withhold, budget=3 | 0.900 | 0.8217 | 3.885 | 0.838800 |
+| withhold, budget=4 | 0.910 | 0.8355 | 4.63 | 0.833039 |
+| withhold, budget=8 | 0.925 | 0.8525 | 8.225 | 0.773764 |
+
+**MRR rises by up to +0.163** — ranks really are being locked in badly. But
+HR@10 falls and MTTC blows out, and the best variant is −0.0233. Decomposed at
+budget=3: MRR +0.0396, HR@10 −0.0300, MTTC −0.0329.
+
+**The HR@10 loss is the surprising part** and worth remembering: withholding
+loses 12 sessions *even with seven turns left to recommend*. More disclosed
+information makes retrieval worse on some sessions — consistent with 53% of
+what a customer can state being boilerplate (`Package Dimensions`,
+`Date First Available`). **Asking more is not free, and not only in turns.**
+
+**Not adopted.** Early recommendation is a hedge that is paying.
 
 **Reconciled with Joey's independent `per_field_depth=800` + NQC confidence
 change (2026-08-30, Dylan Huang):** `main` moved again after the entry below
@@ -583,7 +656,9 @@ which is a different and less structurally-safe kind of change than this
 one.
 
 **3 misses remain** (`public_0092`, `public_0137`, `public_0161`) — not
-diagnosed this pass.
+diagnosed in that pass. **`public_0092` has since been diagnosed** and is
+structurally unwinnable; see the top entry. `public_0137` / `public_0161` /
+`public_0100` remain undiagnosed.
 
 **Intent-router disagreement check (PRD Phase 5, read-only, 2026-08-30, Dylan Huang):**
 
