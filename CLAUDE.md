@@ -233,6 +233,34 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Dialogue block was untunable, and one dead method shipped (2026-08-30, Dylan Huang):**
+
+`tools/tune.py`'s `SEARCH_SPACE` had 20 parameters and zero from
+`DialogueConfig`, even though ablating clarification costs −0.4473 — the
+single largest ablation effect in the system. Two values that clearly
+matter were hardcoded default args, not config: `state.observe`'s
+`override_decay=0.25` (`state.py:190`) and `state.query`'s
+`recency_bonus=0.15` (`state.py:246`). Promoted both to
+`DialogueConfig.override_decay` / `.recency_bonus`, wired them through
+`agent.py`, and added both to `SEARCH_SPACE` under `dialogue.` so the
+tuner can actually search this space — it never could before.
+
+Separately, found `ShopperProfile.quality_bias()` (`profile.py`) was dead
+code: defined, never called anywhere in `shopping_copilot/` (verified by
+grep). Its only dependency, `is_critical`, was used by nothing else either.
+Removed both rather than wiring `quality_bias()` in — `CLAUDE.md`'s own
+roadmap already called it "still undecided, ±0.002," not worth the time
+against the higher-value dialogue-tuning and rank-2 work in flight.
+
+**Verification:** all defaults preserved exactly (`override_decay=0.25`,
+`recency_bonus=0.15` — same numbers, just promoted to config), so this is
+a pure refactor. Confirmed via `python -m unittest discover -s tests`
+(32/32 pass) and a full live evaluator run: `TechnicalScore` unchanged at
+**0.862111**, byte-identical to before. `config/tuned.json` was not
+touched, so this commit does not move the score — it only makes the
+dialogue block reachable by the tuner for the first time. Actually running
+the tuner over the new space is separate, unmeasured follow-up work.
+
 **State audit — the docs had drifted from the code (2026-08-30):**
 
 Re-measured everything rather than trusting the written record, after the docs

@@ -194,6 +194,15 @@ class DialogueConfig:
     # returns. Each prior ask multiplies the expected yield by this.
     repeat_ask_decay: float = 0.45
 
+    # How much an overridden constraint span's weight decays once superseded
+    # (state.observe's override_decay). It stays in the query, just quieter.
+    override_decay: float = 0.25
+
+    # Per-turn boost applied to later constraint disclosures over earlier ones
+    # (state.query's recency_bonus) -- a customer's most recent statement is
+    # more informative than their opening line.
+    recency_bonus: float = 0.15
+
 
 @dataclass
 class Config:

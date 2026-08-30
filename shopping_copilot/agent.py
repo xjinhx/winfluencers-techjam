@@ -123,10 +123,10 @@ class Agent:
     def _respond(self, state: ShoppingState, user_message: str, turn: int, top_k: int) -> dict:
         retrieval = self.config.retrieval
 
-        state.observe(user_message, turn)
+        state.observe(user_message, turn, override_decay=self.config.dialogue.override_decay)
         decision = route(state, self.config.dialogue)
 
-        queries = state.query()
+        queries = state.query(recency_bonus=self.config.dialogue.recency_bonus)
         lexical_mixture, per_field = self.lexical.search(queries, retrieval.per_field_depth)
 
         # The dense route reads the surface text, not the term list: character
