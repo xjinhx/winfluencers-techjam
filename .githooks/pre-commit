@@ -1,0 +1,45 @@
+#!/bin/sh
+#
+# Refuse a commit that changes the tuned weights without updating CLAUDE.md.
+#
+# SETUP -- run once per clone, per machine (git config is not cloned):
+#     git config core.hooksPath .githooks
+# This file itself IS tracked, so edits to it reach everyone on the next pull.
+# Without that one command, git looks in .git/hooks and this never runs.
+#
+# Why this exists: on 2026-08-30 the live score had moved 0.784838 -> 0.862111
+# and no file in the repo recorded it. config/tuned.json had been edited eight
+# hours after the newest saved results file, so the shipping config had never
+# been evaluated into an artefact anyone could quote.
+#
+# This checks the one mechanically decidable half of that failure: weights
+# changed, memory not updated. It cannot check whether the number you wrote is
+# correct. Bypass with --no-verify when you are certain the score did not move.
+
+staged=$(git diff --cached --name-only)
+
+# Config untouched -- nothing to guard.
+echo "$staged" | grep -q '^config/tuned\.json$' || exit 0
+
+# Both staged -- assume the author did the work.
+echo "$staged" | grep -q '^CLAUDE\.md$' && exit 0
+
+cat >&2 <<'EOF'
+
+  config/tuned.json is staged, but CLAUDE.md is not.
+
+  The score has probably moved. Before committing:
+
+    1. Run the evaluator against the new config:
+         $env:SHOPPING_COPILOT_CONFIG = "config\tuned.json"
+         python -m evaluator.local_evaluator --output c:\tmp\out.json
+       (--output to scratch, NEVER results.json)
+
+    2. Update the "Current state" table in CLAUDE.md with the measured
+       TechnicalScore, and add a dated entry under "What was found" saying
+       what changed and why.
+
+  Certain the score did not change? Commit again with --no-verify.
+
+EOF
+exit 1

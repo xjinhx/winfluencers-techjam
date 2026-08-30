@@ -20,11 +20,16 @@ Amazon clothing catalog across 200 public dev sessions, asking clarifying
 questions only when they are worth more than another retrieval call. Scored by
 the organizer's local evaluator, unmodified.
 
-**Repo:** github.com/xjinhx/winfluencers-techjam (`origin`)
+**Repo:** github.com/xjinhx/winfluencers-techjam (`origin`, private)
 **Upstream:** github.com/TechJam2026/techjam-conversational-search (`upstream`, read-only)
-**Main branch:** `main` — stable, evaluated, live submission candidate
-**Active branch:** `maximise-mrr` (started 2026-08-30) — MRR headroom, ranks 2-5 recovery
-**Other branches:** `jinhong`, `joey`, `intentions`, `arwen`, `feat/shopping-copilot` — per-person work, merged into `main` via PR
+**Trunk:** `origin/main` — the real trunk, all work merges here via PR
+**Local `main` is NOT the trunk.** It is still the organizer's untouched starter
+(`3407835 "Publish conversational search challenge"`, no `config/` directory at
+all). Never diff or branch against it thinking it is your work — use
+`origin/main`.
+**Active branch:** `maximise-mrr` — MRR headroom, ranks 2-5 recovery
+**Other branches:** `jinhong`, `joey`, `intentions`, `arwen`, `dylan-data-error`,
+`feat/shopping-copilot` — per-person work
 **Session email:** xjinhx@gmail.com
 **Environment:** Windows 11, Claude Code in VS Code. Primary shell is
 **PowerShell**, not bash — see Critical rule 6.
@@ -79,18 +84,35 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-| item | score | status | date |
-|---|---|---|---|
-| baseline `config/tuned.json` | **0.784838** | committed, live | 2026-08-30 |
-| intent-conditional `w_fused` | **0.8091** | verified, **not adopted** | 2026-08-03 |
-| **max observed** | **0.8091** | (fold B: +0.0121 expected on private set) | — |
+**Live score: `TechnicalScore = 0.862111`** — measured 2026-08-30 by running the
+committed `config/tuned.json` through the unmodified evaluator on all 200 public
+sessions.
 
-**Open decision:** intent-conditional weighting is coded and tested, but
-`w_fused_buying` / `w_fused_uncertain` are not set in the production config.
-See "What was found" for the tradeoff and "Measurement discipline" for why the
-noise floor is what's holding it back.
+| metric | value |
+|---|---|
+| HR@10 | 0.960 (8 misses) |
+| MRR | 0.689704 |
+| MTTC | 2.24 |
+| Efficiency | 0.876 |
+| **TechnicalScore** | **0.862111** |
 
-**Uncommitted:** `README.md` modified (last sync 2026-08-30).
+| scenario | n | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| buying | 80 | 0.9750 | 0.7176 | 1.51 |
+| browsing | 80 | 0.9375 | 0.5966 | 2.29 |
+| intent_override | 30 | 0.9667 | 0.8317 | 3.93 |
+| boundary | 10 | 1.0000 | 0.7850 | 2.60 |
+
+**Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
+`w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
+is no longer an open decision, and any doc saying otherwise is stale.
+
+**Stale artefacts — do not quote these as the current score:**
+- `results.json` = **0.847625** (run 2026-08-30 01:03, eight hours before
+  `config/tuned.json` was last edited) and `results_tuned.json` = **0.784838**.
+  Both predate the current config. `README.md` still headlines 0.8476.
+- `docs/pending.md` was written at the 0.7848 stage. Its P-item numbering is
+  still useful, its measurements are not — see "Roadmap".
 
 ---
 
@@ -211,6 +233,27 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**State audit — the docs had drifted from the code (2026-08-30):**
+
+Re-measured everything rather than trusting the written record, after the docs
+and the code disagreed. Four corrections:
+
+- **Live score is 0.862111, not 0.7848.** Nothing on disk recorded it — the
+  newest saved artefact (`results.json`, 0.8476) was written eight hours before
+  `config/tuned.json` was last edited, so the live config had never been
+  evaluated into a file. Re-ran it to find out. **Lesson: after changing
+  `config/tuned.json`, run the evaluator and record the number, or the next
+  person inherits a config nobody has a score for.**
+- **Intent-conditional weighting was already adopted.** CLAUDE.md called it an
+  open decision; `config/tuned.json` had `w_fused_buying: 0.0` /
+  `w_fused_uncertain: 0.0` set the whole time. The fold-B caution below was
+  overtaken by events.
+- **The rank distribution moved.** The old "93 hits at ranks 2-10, mass at 3-5"
+  is gone. It is now 83 below rank 1 with the mass at **rank 2 (39 hits)** —
+  which redirects the highest-value next step (see "Remaining headroom").
+- **Misses fell 18 → 8.** The old miss analysis (12 in-pool, 6 true retrieval
+  failures) describes a build that no longer exists.
+
 **Double-counting in the fused signal (2026-08-03):**
 
 `fused` is a convex combination of lexical and dense signals that also enter the
@@ -230,29 +273,42 @@ intent, selected on `ctx.intent`. The per-intent map is only built when no
 external `model` is supplied, so the `ScoringModel` seam stays free for GBDT
 work later.
 
-**Status:** coded, tested (0.8091 verified), **not adopted in production
-config** — fold B only justifies +0.0121, below the noise floor in rule 8.
+**Status:** adopted and live — see the 2026-08-30 entry above. (This entry
+previously read "not adopted, fold B only justifies +0.0121". That caution was
+written before the change shipped; it did ship, and the current 0.862111 is
+measured with it in.)
 
 ---
 
 ## Remaining headroom
 
-**Ceiling: 0.970** (hard limit). Current best: 0.8091 (verified).
+**Current 0.862111. Practical ceiling ~0.970** (6 targets believed unreachable,
+so HR@10 caps near 0.97, which caps MRR at 0.97 too). Headroom ≈ **+0.108**,
+and **~78% of it is MRR**.
 
-| component | ceiling | available | priority |
-|-----------|---------|-----------|----------|
-| **HR@10** | 0.970 | +0.020 | low (hard-capped; 6 targets unreachable) |
-| **MRR** | 1.0 | +0.101 | **high** (93 of 186 hits at ranks 2-10; ranks 2-5 alone = +0.0623) |
-| **Efficiency** | 0.930 | +0.020 | medium (misses cost 11 turns; capped by MTTC floor) |
+Recomputed 2026-08-30 from the live run's per-session `best_rank` distribution
+(109 hits at rank 1, 83 below it, 8 misses):
 
-**What's left on the board:** of 18 baseline misses, 12 had the target in the
-pool but outside top-10 (best positions [1,11,11,15,16,16,17,21,28,39,39,87]),
-9 of them within position 30. Only 6 are true retrieval failures.
+| opportunity | hits | score available |
+|---|---|---|
+| **rank 2 → 1** | 39 | **+0.0292** ← single biggest bucket |
+| ranks 2-5 → 1 | 64 | +0.0565 |
+| ranks 6-10 → 1 | 19 | +0.0246 |
+| perfect rerank of every hit we already find | 83 | **+0.0811** |
+| converting all 8 misses | 8 | ~+0.035 (HR@10 +0.02, MRR +0.012, plus MTTC) |
 
-**Next step:** run `why_lost` on the intent-conditional trace to see what costs
-rank after the double-counting fix. (Trace: `features_intent.jsonl` if the
-scratchpad survived; else regenerate in ~3 minutes.) Expect a smaller finding —
-structural errors like the double-count are rare.
+**Rank 2 is where the work is.** 39 sessions retrieve the target and place it
+one position off. That is 20% of the whole set losing half its reciprocal rank
+to a single swap — a bigger, more concentrated target than anything else on the
+board, and it is a pure reranking problem, not a retrieval one.
+
+**The 8 misses** split browsing 5 / buying 2 / intent_override 1. Browsing is
+the weakest track on every metric (HR@10 0.9375, MRR 0.5966) and is where the
+remaining recall loss lives.
+
+**Next step:** run `why_lost --ranks 2` against a fresh trace. The old
+diagnostic targeted ranks 3,4,5 when the distribution was flatter; rank 2 now
+dominates and has never been diagnosed on its own.
 
 ## Gradient boosting future work (LambdaRank / LightGBM)
 
@@ -275,13 +331,40 @@ Also note Critical rule 5 — LightGBM breaks the stdlib-only guarantee.
 
 ## Roadmap (ordered by expected impact)
 
+Measured against the live 0.862111, not `docs/pending.md`'s 0.7848-era figures.
+
 | priority | item | impact | notes |
 |----------|------|--------|-------|
-| **high** | Rank 2-5 recovery | +0.0623 MRR | 63 sessions stuck in 2-5; needs feature analysis |
-| high | Full GBDT model | +0.05-0.15 (est.) | needs corrected features + frozen retriever first |
-| medium | Retrieval refinement | +0.01-0.05 (est.) | similarity, query expansion, better intent use |
-| medium | Context refinement for buying | +0.01 (est.) | buying intent logic could be tighter |
-| low | Intent override handling | +0.005 (est.) | diminishing returns; only 4 sessions affected |
+| **high** | **Rank 2 → 1 recovery** | **+0.0292** | 39 sessions, one swap each. Pure reranking. Never diagnosed on its own — `why_lost --ranks 2` |
+| high | Tune the dialogue block (`pending.md` P0) | unmeasured | still true and still untouched: `SEARCH_SPACE` in `tools/tune.py` has 20 params, **zero** from `dialogue`, though clarification ablates to −0.4473. Prerequisite: promote `state.observe(override_decay=)` and `state.query(recency_bonus=)` to `DialogueConfig` |
+| high | Full GBDT / LambdaRank (P2) | up to +0.0811 | that is the perfect-rerank bound. Needs frozen retriever + penalty folded into features first — see below |
+| medium | Browsing recall | ~+0.02 | 5 of 8 misses and the worst MRR (0.5966) are browsing |
+| medium | Ranks 6-10 → 1 | +0.0246 | 19 sessions, likely the same fix as rank 2 |
+| low | Learn `TAG_LEXICON` instead of hand-writing it (P4) | +0.0010 measured | `profile.py:22`; the feature it feeds ablates to inert |
+| low | Decide the fate of the two inert components (P5) | ±0.002 | still undecided; both still shipped |
+
+**`docs/pending.md` status** (written at 0.7848, so treat its numbers as
+historical): P0 untouched · P1 **done**, though via per-intent ranking weights
+rather than the retrieval multipliers it proposed · P2 untouched · P3 diagnosed
+but superseded (18 misses → 8) · P4 untouched · P5 undecided.
+
+## Open risk — modified evaluator on `origin/main`
+
+**`origin/main` carries a modified `evaluator/local_evaluator.py`** (+237/−64
+vs `upstream/main`), introduced in commit `7303cea`, whose message reads
+*"docs: add phase 4 implementation report"*. `maximise-mrr`'s copy is clean and
+byte-identical to the organizer's.
+
+[docs/submission_rules.md:51](docs/submission_rules.md#L51) lists **"code that
+modifies evaluator files"** among prohibited submissions.
+
+The change itself is the `dylan-data-error` robustness work (`validate_session()`,
+per-session failure isolation, 35 new tests) and
+`docs/DATA_ROBUSTNESS_IMPLEMENTATION.md` states the public-set metrics come out
+identical — so it is not score manipulation. But the rule has no exception for
+well-tested changes, and it currently sits on the branch a submission would be
+cut from. **Unresolved. Decide before submitting; do not let it be discovered
+at judging.**
 
 ## Out of scope for current work
 
@@ -293,6 +376,15 @@ Noted so they don't creep into the roadmap:
 - **Modifying the evaluator or the catalog** to make a number move. Rules 3 and 4.
 - **Chasing HR@10 past ~0.97.** Six targets are genuinely unreachable; the
   remaining headroom there is +0.020 against +0.101 in MRR.
+- **Popularity debiasing / calibrated recommendation.** That literature exists to
+  correct a bias these labels contain *by construction*. Applying it means
+  fighting the metric. The honest framing already in the README is the right
+  response, not a technical fix. (`agent_architecture.md:250`)
+- **The RL clarification policies** (SCPR, UNICORN). They assume clean per-item
+  attribute sets this catalog does not have. The EAR gate is the part that
+  transfers.
+- **LLM reranking.** Order-sensitive, therefore non-deterministic for a graded
+  submission, and official scoring may run without network access.
 - **Refactoring for its own sake.** The competition ends before the payoff does.
 
 ---
@@ -302,8 +394,11 @@ Noted so they don't creep into the roadmap:
 - Direct and decision-focused. Prefers options plus a recommendation over
   open-ended questions.
 - Pushes back when something is wrong — don't be defensive, just fix it.
-- **Commits are authored by He Jinhong alone.** No `Co-Authored-By: Claude`
-  trailer, ever.
+- **Authorship is the person who made the change** — whoever on the team did the
+  work, not always He Jinhong. If someone else's work is going in, credit them
+  (`Co-Authored-By:` with their name and email).
+- **Never add Claude as an author or co-author.** No `Co-Authored-By: Claude`
+  trailer, no "Generated with Claude Code" line, on any commit or PR.
 - Work lands on a personal branch and merges into `main` by PR.
 - Wants the reasoning recorded, not just the result — a change without its
   measurement and its tradeoff is not finished.
@@ -312,9 +407,26 @@ Noted so they don't creep into the roadmap:
 
 ## Keeping this file current
 
-**The mechanism is a convention, not a hook:** when a session produces
+**The mechanism is a convention, not automation:** when a session produces
 something material, the CLAUDE.md edit goes into the *same commit* as the change
-itself. That is how this file stays true instead of drifting into fiction.
+itself. Nothing happens on push. This file stays true only because whoever made
+the change wrote down why, while they still remembered.
+
+**One mechanical guard exists.** `.githooks/pre-commit` refuses a commit that
+stages `config/tuned.json` without also staging `CLAUDE.md`, since that is the
+exact shape of the 2026-08-30 drift. It checks only that you touched the file,
+never that the number is right, and `--no-verify` bypasses it.
+
+**Every clone must run this once** — the hook script is tracked and travels with
+the repo, but the setting that activates it is local config and does not:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Without it git keeps looking in `.git/hooks` and the guard silently never runs.
+Worth pasting into the PR description when this lands, since nobody will read a
+hook they don't know exists.
 
 **Material means any of:**
 - the score moved (either direction — regressions are the most valuable entries)
@@ -327,12 +439,40 @@ itself. That is how this file stays true instead of drifting into fiction.
 before measurement, anything already recorded in the git history alone.
 
 **What an entry looks like:** date, what changed, what it measured, and *why*
-the call went the way it did. The intent-conditional entry above is the
-template — the useful part is "fold B only justifies +0.0121, below the noise
-floor", not "0.8091".
+the call went the way it did. The 2026-08-30 state-audit entry is the template —
+the useful part is "the live config had never been evaluated into a file", not
+"0.862111". A number without the reason it moved is a number the next person
+cannot act on.
+
+**The failure mode this file exists to prevent** is the one the 2026-08-30 audit
+found: the score moved from 0.7848 to 0.8621 and no document knew. If you change
+`config/tuned.json`, the same commit re-runs the evaluator and updates the
+"Current state" table. No exceptions — an unrecorded score is worse than no
+score, because it looks trustworthy.
 
 **Where things go:** score/config → "Current state" table. Findings and
 decisions → "What was found" (newest first). New risks → "Critical rules" or
 "Critical evaluator facts". Everything else → "Roadmap" or "Out of scope".
+
+### Three conventions that make entries readable months later
+
+**1. Quote the request verbatim, with a date and who asked.**
+`**Dropped MMR entirely (2026-09-02, per Joey: "it's doing nothing, why is it
+still here")**`. A paraphrase records the decision; the quote records the
+*reasoning behind* the decision, which is what you need when deciding whether
+it still holds. Attribute to the person, not to "the team".
+
+**2. Supersede, never delete.** When something is reversed, leave the original
+entry and mark it: *"Superseded 2026-09-04 — see below"*, *"added 2026-09-01,
+removed 2026-09-03 because…"*. A file that only shows what survived teaches
+nothing about what was already tried and failed, and someone will retry it.
+This includes your own errors — *"this entry claimed X; that was wrong, caught
+by He Jinhong"* is one of the most useful lines the file can contain.
+
+**3. Always state verification status, especially when it is bad.** *"Verified
+end-to-end against all 200 sessions"* and *"not measured — ran out of time"* are
+both useful; an entry with no status silently reads as verified. Say what you
+ran, on what, and what you did not run. If a result came from a fold, a subset,
+or a single seed, say so — see "Measurement discipline".
 
 Check `git log -- CLAUDE.md` to see when it was last synced.
