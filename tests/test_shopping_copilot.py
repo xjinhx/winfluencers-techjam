@@ -16,7 +16,7 @@ from tempfile import TemporaryDirectory
 from shopping_copilot.catalog import Catalog
 from shopping_copilot.clarify import ALLOWED_ATTRIBUTES
 from shopping_copilot.config import Config
-from shopping_copilot.features import FEATURE_NAMES, extract
+from shopping_copilot.features import FEATURE_NAMES, ScoringContext, extract
 from shopping_copilot.profile import ShopperProfile
 from shopping_copilot.ranking import LinearModel, Ranker
 from shopping_copilot.state import ShoppingState, parse_utterance
@@ -371,6 +371,64 @@ class IntentFusionTests(unittest.TestCase):
             model=LinearModel({"fused": 1.0}),
         )
         self.assertEqual(ranker.intent_models, {})
+
+
+class SpanMatchTest(unittest.TestCase):
+    """`span_all` is the conjunctive bit `phrase_*` cannot express.
+
+    Ordered-bigram overlap gives the same value for "3 of 4 spans matched" and
+    "all 4"; `span_all` separates them, and that separation is what took
+    `public_0092` from 284 candidates to 2. See CLAUDE.md.
+    """
+
+    def _ctx(self, catalog, spans):
+        return ScoringContext(
+            catalog=catalog, constraints=Constraints(),
+            profile=ShopperProfile.parse(None), fused={}, per_field={}, dense={},
+            query_terms=set(), query_bigrams=set(), category_terms=set(),
+            constraint_spans=spans,
+        )
+
+    def test_vector_length_matches_feature_names(self):
+        catalog, product = _tiny_catalog()
+        vector = extract(product, self._ctx(catalog, ("cotton blend",)))
+        self.assertEqual(len(vector), len(FEATURE_NAMES))
+
+    def test_all_spans_matched_sets_span_all(self):
+        catalog, product = _tiny_catalog()
+        ctx = self._ctx(catalog, ("cotton blend", "button closure"))
+        f = dict(zip(FEATURE_NAMES, extract(product, ctx)))
+        self.assertEqual(f["span_coverage"], 1.0)
+        self.assertEqual(f["span_all"], 1.0)
+
+    def test_partial_match_clears_span_all_but_not_coverage(self):
+        catalog, product = _tiny_catalog()
+        ctx = self._ctx(catalog, ("cotton blend", "not in this product at all"))
+        f = dict(zip(FEATURE_NAMES, extract(product, ctx)))
+        self.assertEqual(f["span_coverage"], 0.5)
+        self.assertEqual(f["span_all"], 0.0, "3-of-4 must not read as all-matched")
+
+    def test_no_spans_is_inert(self):
+        catalog, product = _tiny_catalog()
+        f = dict(zip(FEATURE_NAMES, extract(product, self._ctx(catalog, ()))))
+        self.assertEqual(f["span_coverage"], 0.0)
+        self.assertEqual(f["span_all"], 0.0)
+
+
+def _tiny_catalog():
+    row = {
+        "parent_asin": "SPANTEST1", "title": "Test Pajama Set",
+        "features": ["cotton blend", "Button closure"],
+        "details": {"Department": "womens"},
+        "categories": ["Clothing, Shoes & Jewelry", "Women", "Sleep & Lounge", "Sets"],
+        "description": [], "price": 20.0, "average_rating": 4.0, "rating_number": 10,
+        "store": "TestStore",
+    }
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "c.jsonl"
+        path.write_text(json.dumps(row) + chr(10), encoding="utf-8")
+        catalog = Catalog(str(path))
+    return catalog, catalog.by_asin["SPANTEST1"]
 
 
 if __name__ == "__main__":

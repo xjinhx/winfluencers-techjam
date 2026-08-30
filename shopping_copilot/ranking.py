@@ -81,6 +81,8 @@ def build_linear_weights(
         "phrase_title": ranking.w_phrase_title,
         "phrase_features": ranking.w_phrase_features,
         "phrase_categories": ranking.w_phrase_categories,
+        "span_coverage": ranking.w_span_coverage,
+        "span_all": ranking.w_span_all,
         "coverage": ranking.w_coverage,
         "popularity": priors.w_log_rating_number,
         "quality": priors.w_average_rating,

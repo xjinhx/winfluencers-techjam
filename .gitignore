@@ -27,3 +27,5 @@ tuning.log
 PRD_rank_diagnostic.md
 docs/rank_diagnostic.md
 PRD_pairwise_rerank.md
+PRD_clarify_attribute.md
+PRD_category_candidates.md
