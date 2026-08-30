@@ -84,23 +84,31 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.876336`** — measured 2026-08-30 by running the
+**Live score: `TechnicalScore = 0.876342`** — measured 2026-08-30 by running the
 committed `config/tuned.json` through the unmodified evaluator on all 200 public
 sessions. Up from 0.862111 — see "What was found" below (`per_field_depth`
-220 → 1000, a recall fix, not a reranking fix).
+220 → **800**, a recall fix, not a reranking fix).
+
+**On 800 vs. 1000:** this was independently found twice — Dylan tested and
+adopted `1000` (0.876336) before discovering He/Joey had independently pushed
+`800` (0.876342) to `main` in the meantime. Reconciled by keeping `800` (per
+Dylan's explicit choice, and it's already what `main` has) — the two scores
+are statistically indistinguishable (+0.000006 apart, nowhere near the ~0.05
+MRR-scale noise floor), so this was a coordination call, not a quality one.
+Don't re-litigate 1000 vs. 800 based on this tiny gap.
 
 | metric | value |
 |---|---|
 | HR@10 | 0.985 (3 misses, down from 8) |
-| MRR | 0.680121 |
-| MTTC | 2.01 |
-| Efficiency | 0.899 |
-| **TechnicalScore** | **0.876336** |
+| MRR | 0.679141 |
+| MTTC | 1.995 |
+| Efficiency | 0.9005 |
+| **TechnicalScore** | **0.876342** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 0.9875 | 0.7283 | 1.43 |
-| browsing | 80 | 0.9750 | 0.5892 | 1.95 |
+| buying | 80 | 1.0000 | 0.7245 | 1.29 |
+| browsing | 80 | 0.9625 | 0.5907 | 2.05 |
 | intent_override | 30 | 1.0000 | 0.7972 | 3.70 |
 | boundary | 10 | 1.0000 | 0.6700 | 2.10 |
 
@@ -109,9 +117,11 @@ sessions. Up from 0.862111 — see "What was found" below (`per_field_depth`
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
-- **0.862111 and 0.863556** (and the 8-miss / `target_never_in_pool=6` figures
-  that went with them) both predate the `per_field_depth` fix below — the
-  first is pre-merge-with-main, the second is post-merge but pre-fix.
+- **0.862111, 0.863556, and 0.876336** (and the miss lists that went with
+  them) all predate the final `per_field_depth=800` reconciliation below.
+  0.862111 is pre-merge-with-main; 0.863556 is post-merge-pre-fix;
+  0.876336 was Dylan's own `per_field_depth=1000` before reconciling with
+  Joey's `800` already on `main`.
 - `results.json` = **0.847625** (run 2026-08-30 01:03, eight hours before
   `config/tuned.json` was last edited) and `results_tuned.json` = **0.784838**.
   Both predate the current config. `README.md` still headlines 0.8476.
@@ -248,8 +258,33 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Reconciled with Joey's independent `per_field_depth=800` + NQC confidence
+change (2026-08-30, Dylan Huang):** `main` moved again after the entry below
+was written — Joey independently landed `per_field_depth=800` (same lever,
+found separately) plus a new NQC-based confidence formula in `clarify.py`
+(Shtok et al. 2009, replacing the old margin-vs-mean-of-rest heuristic).
+Merged, resolved the `per_field_depth` conflict to **800** (Dylan's explicit
+choice, already what `main` had — the 800-vs-1000 score gap is +0.000006,
+inside noise, not a quality signal either way). **Isolated the NQC change's
+own effect: byte-identical `TechnicalScore` (0.876342) with the old and new
+confidence formula, both at `per_field_depth=800`.** It's a reasonable, cited
+idea, currently a no-op on the public 200 — never once flips a
+confidence-gate decision differently than the old formula did. Whether it
+diverges on the private 800 is untested and unknowable from here; it's a
+latent behavior change riding along, not a verified improvement, and should
+be described as such rather than credited for score movement it didn't
+produce. Full validation at the reconciled state: offline_eval 200/200
+agreement, `target_never_in_pool` 6 → 3 (not as strong as depth=1000's 6 → 1,
+expected since 800 is a smaller recall increase), 32/32 tests pass. Miss set
+shifted at the margin between the two depths, worth noting honestly: at 1000
+the 3 misses were `public_0092`/`public_0137`/`public_0161`; at 800 they're
+`public_0092`/`public_0100`/`public_0137` — `public_0161` gets fixed at 1000
+but not 800, while `public_0100` is the reverse. Neither depth is a strict
+superset of the other's wins.
+
 **`public_0095`'s retrieval miss root-caused and fixed — a real recall bug,
-not a reranking one: `per_field_depth` 220 → 1000 (2026-08-30, Dylan Huang):**
+not a reranking one: `per_field_depth` 220 → 1000, later reconciled to 800,
+see entry above (2026-08-30, Dylan Huang):**
 
 **The request:** investigate `public_0095` (buying scenario, target
 `B09N78FT2W`, a "Free Leaper High Waisted Yoga Pants... Leggings" listing),
