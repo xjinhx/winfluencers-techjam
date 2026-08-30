@@ -91,9 +91,13 @@ class Agent:
         # The extractor is shared, not rebuilt: its brand and category
         # vocabularies are derived from the whole catalog and are session-
         # independent. Only the accumulated slots live on the state.
+        try:
+            profile = ShopperProfile.parse(user_profile)
+        except Exception:  # pragma: no cover - last-resort guard, mirrors respond()
+            profile = ShopperProfile.parse(None)
         self.sessions[session_id] = ShoppingState(
             session_id=session_id,
-            profile=ShopperProfile.parse(user_profile),
+            profile=profile,
             extractor=self.extractor,
         )
 

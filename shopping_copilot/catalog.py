@@ -129,6 +129,8 @@ def _parse_price(value: object) -> float | None:
 
 
 def _category_path(values: object) -> tuple[str, ...]:
+    if isinstance(values, str):
+        values = [values]
     out: list[str] = []
     for value in values or []:
         for part in str(value).split(","):
@@ -150,10 +152,19 @@ class Catalog:
 
     def _load(self) -> None:
         with self.path.open(encoding="utf-8") as handle:
-            for idx, line in enumerate(handle):
+            for line in handle:
                 if not line.strip():
                     continue
-                row = json.loads(line)
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                raw_parent_asin = row.get("parent_asin")
+                parent_asin = raw_parent_asin.strip() if isinstance(raw_parent_asin, str) else ""
+                if not parent_asin or parent_asin in self.by_asin:
+                    continue
                 details = row.get("details") or {}
                 title = str(row.get("title") or "")
                 features = row.get("features") or []
@@ -164,9 +175,12 @@ class Catalog:
                 # details, so they share one retrieval surface.
                 features_text = " ".join([flatten(features), flatten(details)]).strip()
                 category_path = _category_path(row.get("categories"))
+                # idx must track list position, not the raw file line number --
+                # every branch above can skip a line, and _tokens_cached()/
+                # _bigrams_cached() index back into self.products by this value.
                 product = Product(
-                    idx=idx,
-                    parent_asin=str(row["parent_asin"]),
+                    idx=len(self.products),
+                    parent_asin=parent_asin,
                     title=title,
                     features_text=features_text,
                     categories_text=flatten(row.get("categories")),

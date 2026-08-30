@@ -50,9 +50,10 @@ class ShopperProfile:
     @classmethod
     def parse(cls, payload: dict | None) -> "ShopperProfile":
         payload = payload or {}
+        raw_tags = payload.get("preference_tags")
         tags = tuple(
             str(tag).strip().lower()
-            for tag in (payload.get("preference_tags") or [])
+            for tag in (raw_tags if isinstance(raw_tags, list) else [])
             if str(tag).strip()
         )
         lexicon: list[str] = []
