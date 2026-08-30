@@ -84,31 +84,32 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.876342`** — measured 2026-08-30 by running the
+**Live score: `TechnicalScore = 0.881716`** — measured 2026-08-30 by running the
 committed `config/tuned.json` through the unmodified evaluator on all 200 public
-sessions. Up from 0.862111 — see "What was found" below (`per_field_depth`
-220 → **800**, a recall fix, not a reranking fix).
+sessions. Up from 0.876342 — see "What was found" below
+(`constraint_commonness_penalty` 0.0 → **0.3**, on branch
+`fix/public-0100-candidate-depth`, not yet merged to `main`).
 
-**On 800 vs. 1000:** this was independently found twice — Dylan tested and
-adopted `1000` (0.876336) before discovering He/Joey had independently pushed
-`800` (0.876342) to `main` in the meantime. Reconciled by keeping `800` (per
-Dylan's explicit choice, and it's already what `main` has) — the two scores
-are statistically indistinguishable (+0.000006 apart, nowhere near the ~0.05
-MRR-scale noise floor), so this was a coordination call, not a quality one.
-Don't re-litigate 1000 vs. 800 based on this tiny gap.
+**On 800 vs. 1000 (`per_field_depth`):** this was independently found twice —
+Dylan tested and adopted `1000` (0.876336) before discovering He/Joey had
+independently pushed `800` (0.876342) to `main` in the meantime. Reconciled by
+keeping `800` (per Dylan's explicit choice, and it's already what `main` has)
+— the two scores are statistically indistinguishable (+0.000006 apart, nowhere
+near the ~0.05 MRR-scale noise floor), so this was a coordination call, not a
+quality one. Don't re-litigate 1000 vs. 800 based on this tiny gap.
 
 | metric | value |
 |---|---|
-| HR@10 | 0.985 (3 misses, down from 8) |
-| MRR | 0.679141 |
-| MTTC | 1.995 |
-| Efficiency | 0.9005 |
-| **TechnicalScore** | **0.876342** |
+| HR@10 | 0.990 (2 misses, down from 3) |
+| MRR | 0.687054 |
+| MTTC | 1.97 |
+| Efficiency | 0.903 |
+| **TechnicalScore** | **0.881716** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7245 | 1.29 |
-| browsing | 80 | 0.9625 | 0.5907 | 2.05 |
+| buying | 80 | 1.0000 | 0.7301 | 1.31 |
+| browsing | 80 | 0.9750 | 0.6048 | 1.96 |
 | intent_override | 30 | 1.0000 | 0.7972 | 3.70 |
 | boundary | 10 | 1.0000 | 0.6700 | 2.10 |
 
@@ -117,11 +118,12 @@ Don't re-litigate 1000 vs. 800 based on this tiny gap.
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
-- **0.862111, 0.863556, and 0.876336** (and the miss lists that went with
-  them) all predate the final `per_field_depth=800` reconciliation below.
+- **0.862111, 0.863556, 0.876336, and 0.876342** (and the miss lists that went
+  with them) all predate the `constraint_commonness_penalty` fix below.
   0.862111 is pre-merge-with-main; 0.863556 is post-merge-pre-fix;
   0.876336 was Dylan's own `per_field_depth=1000` before reconciling with
-  Joey's `800` already on `main`.
+  Joey's `800` already on `main`; 0.876342 is the reconciled `800` value,
+  current on `main` but superseded on this branch.
 - `results.json` = **0.847625** (run 2026-08-30 01:03, eight hours before
   `config/tuned.json` was last edited) and `results_tuned.json` = **0.784838**.
   Both predate the current config. `README.md` still headlines 0.8476.
@@ -257,6 +259,171 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**`constraint_commonness_penalty` adopted — the deeper fix for `public_0100`,
+generalizes to a second session (2026-08-30, Dylan Huang, branch
+`fix/public-0100-candidate-depth`):**
+
+**Follow-up to the entry below.** After `candidate_depth` was rejected,
+traced `public_0100` turn-by-turn (not just turn 1) and found the real
+mechanism: the target ranks **110th of 800 at turn 1** (fine), then
+**vanishes from the candidate pool entirely from turn 2 onward**. Turn 2
+discloses *"Manmade sole; Platform measures approximately 0.5\""* —
+verbatim from the target's own listing — and "manmade"/"sole"/"platform"/
+"approximately"/"measure" are near-universal shoe-listing boilerplate.
+Added as high-weight query terms (0.975–1.15), they pull in thousands of
+competing documents; the target's own `features`-field rank for this exact
+query is 1196th of 14,176 matches, outside even `per_field_depth=800`, and
+its overall fused rank collapses from ~110th to ~1049th.
+
+**Deliberately not fixed with a hardcoded phrase list** (per direct
+instruction — would overfit to phrases seen in the 200 public sessions,
+won't generalize to the private 800). Instead: **measure how common each
+disclosed term actually is across the catalog, and down-weight
+proportionally** — the same IDF/document-frequency philosophy
+`BM25Field.search()` already applies internally, but as an explicit,
+continuous ramp at query-construction time, scoped only to
+constraint-span terms (never the category phrase).
+
+**Implementation, reusing existing infrastructure, no new indexing:**
+- `LexicalIndex.commonness(term)` (`index.py`) — reuses the already-built
+  per-field `doc_frequency()` postings, returns the max document-frequency
+  ratio across title/features/categories.
+- `RetrievalConfig.constraint_commonness_penalty` (`config.py`) — new
+  field, default `0.0` (disabled, byte-identical to prior behaviour).
+- `ShoppingState.query()` (`state.py`) — new optional params
+  (`term_commonness`, `commonness_penalty_strength`, `max_df_ratio`);
+  inside the constraint-term loop only: `damping = 1.0 -
+  strength * max(0.0, 1.0 - df_ratio/max_df_ratio)`, ramping weight down
+  continuously as a term's catalog frequency approaches the existing
+  hard `max_df_ratio` cutoff, rather than all-or-nothing at it.
+- `agent.py` — one call site updated to pass the three new arguments.
+
+**Verified score-neutral at the default (mandatory gate, checked before
+sweeping anything):** 32/32 tests pass, full live evaluator run reproduces
+`TechnicalScore=0.876342` exactly, byte-identical.
+
+**Grid swept against `stratified_halves(seed=7)`, based on the live tuned
+config:**
+
+| strength | train | holdout |
+|---|---|---|
+| 0.0 (baseline) | 0.8722 | 0.8805 |
+| 0.05 | 0.8725 (+0.0003) | 0.8802 (−0.0002) |
+| 0.10 | 0.8720 (−0.0002) | 0.8788 (−0.0017) |
+| 0.15 | 0.8707 (−0.0015) | 0.8781 (−0.0024) |
+| 0.20 | 0.8707 (−0.0015) | 0.8878 (+0.0073) |
+| **0.30 (adopted)** | **0.8736 (+0.0014)** | **0.8898 (+0.0093)** |
+| 0.35 | 0.8715 (−0.0007) | 0.8898 (+0.0093) |
+| 0.40 | 0.8700 (−0.0022) | 0.8898 (+0.0093) |
+| 1.00 | 0.8652 (−0.0070) | 0.8870 (+0.0065) |
+
+**Holdout improves at every value from 0.20 upward, plateauing at
+0.30-0.40 — the same non-overfitting signature `per_field_depth` showed,
+and the opposite of `candidate_depth`'s.** This is structural for the same
+reason: the damping only ever *reduces* noise proportional to *measured*
+catalog frequency, it never invents a coefficient shaped to fit train-set
+patterns. `0.30` was chosen over the higher plateau values as the more
+conservative choice — it's simultaneously where train peaks and where
+holdout's plateau begins, not an arbitrary pick from a flat region.
+
+**Full 200-session result, adopted into `config/tuned.json`:**
+`TechnicalScore` 0.876342 → **0.881716** (+0.0054). **HR@10 0.985 → 0.990
+(3 misses → 2)**, MRR 0.679141 → 0.687054, MTTC 1.995 → 1.97,
+`target_never_in_pool` 3 → 2. `offline_eval` confirms 200/200 session
+agreement. 32/32 tests pass.
+
+**`public_0100` itself: confirmed fixed, and cleanly** — turn 3, rank 1
+(the best possible reciprocal rank). This is the specific session the fix
+was designed around, and it worked exactly as diagnosed, not
+coincidentally.
+
+**Bonus check (not diagnostic):** `public_0092` and `public_0137` are
+still misses at this value — unaffected, consistent with them not having
+been diagnosed as sharing this mechanism.
+
+**Not on `main` yet** — this branch (`fix/public-0100-candidate-depth`)
+also carries the earlier, rejected `candidate_depth` experiment (see entry
+below), documented rather than discarded since it's what motivated tracing
+`public_0100` turn-by-turn in the first place, which is what actually found
+this fix.
+
+**`public_0100` diagnosed and a targeted fix tested — rejected, and the
+rejection revealed a different, harder problem than `per_field_depth`
+(2026-08-30, Dylan Huang, branch `fix/public-0100-candidate-depth`):**
+
+**The request:** of the 3 misses remaining after the `per_field_depth`
+fix, root-cause `public_0100` specifically (browsing scenario, target
+`B002OHE4D6`, a men's Dockers leather loafer).
+
+**Diagnosis, traced directly, not guessed:** turn 1's query ("I'm looking
+for Shoes Loafers & Slip-Ons, but I'm still exploring.") already ranks the
+target well inside every per-field cutoff — `categories` rank 23/808,
+`title` rank 312/5355, both comfortably under `per_field_depth=800`. The
+apparent bottleneck at turn 1 was the aggregate fusion cutoff instead:
+uncapped fused rank 294/2417, just outside `candidate_depth=200`.
+Unlike `per_field_depth`, this is squarely `RetrievalConfig.candidate_depth`
+territory — a genuinely different lever from the earlier fix.
+
+**A real code detail surfaced along the way:** `agent.py` does
+`candidate_ids = top_n(fused, candidate_depth)` then
+`candidate_ids[:rerank_depth]` — since `rerank_depth` currently equals
+`candidate_depth` (200==200), raising one alone does nothing; both must
+move together for the change to take effect at all.
+
+**Tested exactly like the `per_field_depth` fix — grid swept against
+`stratified_halves(seed=7)`, `candidate_depth`/`rerank_depth` moved
+together:**
+
+| depth | train | holdout | 100-session time |
+|---|---|---|---|
+| 200 (baseline) | 0.8722 | 0.8805 | ~9s |
+| 250 | 0.8714 (−0.0008) | 0.8748 (−0.0057) | ~10.5s |
+| 300 | 0.8696 (−0.0026) | 0.8721 (−0.0084) | ~11.3s |
+| 400 | 0.8788 (+0.0067) | 0.8728 (−0.0077) | ~10.8s |
+| 500 | 0.8788 (+0.0067) | 0.8719 (−0.0086) | ~13.1s |
+| 800 | 0.8789 (+0.0067) | 0.8706 (−0.0099) | ~17.7s |
+
+**Every single value regressed holdout, monotonically worse at higher
+depths — the same signature as the rejected pairwise-LTR and weight-tuning
+experiments, not the `per_field_depth` result.** Also, unlike
+`per_field_depth`, this one carries a real, growing timing cost (9s → 17.7s
+per 100-session fold at depth 800 — roughly double, since raising
+`rerank_depth` scales the expensive per-candidate feature-extraction +
+scoring path, not just a cheap pre-fusion BM25 cutoff).
+
+**Confirmatory check — and this is the important part: `public_0100`
+itself never flips, at any tested depth, including 800.** Traced the full
+10-turn transcript at `candidate_depth=800`: by turn 8 the session's
+top-5 is `Bruno Marc Men's Leather Lined Dress Loafers`, `Stacy Adams
+Men's Flynn Moc-Toe Bit Slip-On Loafer`, `Go Tour Men's Premium Genuine
+Leather Casual Slip-On Loafers` — several genuinely similar, legitimate
+men's leather dress loafers the customer's disclosed constraints
+(material, brand) don't distinguish from the actual target. **This is not
+a pool-depth problem at all once enough turns pass — it's the
+reranker failing to discriminate among several near-identical
+competitors, the same class of problem as the already-investigated (and
+already-rejected, see the LambdaMART/separability entry) rank-2
+reranking problem.** The turn-1 candidate_depth analysis above was real
+and correctly diagnosed turn 1, but doesn't explain why the miss persists
+through turn 10 — a materially incomplete picture that only surfaced by
+tracing the full transcript, not just turn 1.
+
+**Rejected. `config/tuned.json` untouched.** Per the same discipline as
+every other experiment this session: a regression on holdout is a reason
+not to ship, not a reason to keep searching for a luckier value.
+
+**Bonus check (not diagnostic):** at `candidate_depth=300`, `public_0092`
+and `public_0137` are also still misses — observed in the same replay,
+not separately diagnosed. Do not treat this as evidence about their root
+cause; they have not been traced the way `public_0095`/`public_0100` were.
+
+**What this changes about the remaining-misses picture:** `public_0100`
+is now understood to need a *feature* (something that discriminates
+between very similar men's leather loafers), not a *depth* parameter —
+squarely in the same "needs new information in the vector, not a better
+cutoff or weight" category the rank-2 finding already established.
+`public_0092` and `public_0137` remain genuinely undiagnosed.
 
 **Reconciled with Joey's independent `per_field_depth=800` + NQC confidence
 change (2026-08-30, Dylan Huang):** `main` moved again after the entry below
