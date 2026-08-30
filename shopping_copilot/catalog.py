@@ -22,7 +22,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .text import bigrams, flatten, tokenize
+from .text import (
+    LOW_VALUE,
+    STOPWORDS,
+    TOKEN_RE,
+    bigrams,
+    flatten,
+    install_plural_exceptions,
+    tokenize,
+)
 
 # details.Department is free text with inconsistent casing and hyphenation.
 # Everything collapses onto these buckets.
@@ -148,8 +156,31 @@ class Catalog:
         self.path = Path(path)
         self.products: list[Product] = []
         self.by_asin: dict[str, Product] = {}
+        # Raw, unstemmed surface forms from titles and category paths, filled
+        # during _load and consumed immediately after it. Nothing tokenises
+        # before this point -- _load only calls flatten() -- so the stemmer is
+        # settled before the first term enters an index.
+        #
+        # Titles and taxonomy only, not description or marketing copy: the
+        # question this answers is which singular *this catalog* uses to name a
+        # thing, and that vocabulary lives in what products are called and how
+        # they are filed. Widening it to every field costs 4x the load time and
+        # adds only non-product words (cookies, zombies, preemies) -- every
+        # garment term resolves identically either way.
+        self.surface_counts: dict[str, int] = {}
         self._load()
+        install_plural_exceptions(self.surface_counts)
         self._fit_priors()
+
+    def _count_surface_forms(self, text: str) -> None:
+        """Tally unstemmed tokens. Mirrors `tokenize`'s filters exactly, minus
+        the stemming step -- the whole point is to see the surface forms."""
+        counts = self.surface_counts
+        for raw in TOKEN_RE.findall(text):
+            token = raw.lower()
+            if len(token) < 2 or token in STOPWORDS or token in LOW_VALUE:
+                continue
+            counts[token] = counts.get(token, 0) + 1
 
     def _load(self) -> None:
         with self.path.open(encoding="utf-8") as handle:
@@ -207,6 +238,8 @@ class Catalog:
                 )
                 self.products.append(product)
                 self.by_asin[product.parent_asin] = product
+                self._count_surface_forms(product.title)
+                self._count_surface_forms(product.categories_text)
 
     def _fit_priors(self) -> None:
         """Scale the prior features to [0, 1] so ranking weights stay
