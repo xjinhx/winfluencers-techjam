@@ -233,6 +233,70 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Rank-2 diagnostic run; two well-motivated fixes tested, neither survives holdout (2026-08-30, Dylan Huang):**
+
+Ran `why_lost --ranks 2` for the first time (previous diagnostics targeted
+3-5, back when the distribution was flatter). 39 sessions, 39 (session,
+winner) pairs. Feature-contribution breakdown of the score gap:
+
+```
+bm25_title      46.9% share, mean_gap +0.0667, against 67%
+bm25_features   39.9% share, mean_gap +0.0567, against 56%
+phrase_title    10.2% share
+fused           10.1% share
+dense            7.7% share
+(all 12 constraint columns: exactly 0.0% share, every one)
+popularity      -6.9% share (favors target, not enough)
+has_price       -6.5% share (favors target, not enough)
+coverage        -5.5% share (favors target, not enough)
+```
+
+Structured constraints are not the story here — confirms the earlier
+finding still holds at rank 2. The imposter wins on raw BM25 title/features
+match; nothing else is strong enough to overcome it in these 39 cases.
+
+**Hypothesis 1 — `w_fused_browsing` partial reduction.** `fused` still
+carries 10.1% of the gap and shows up as a top-3 contributor specifically
+in browsing sessions (12/39). `w_fused_browsing` has been `None` (full
+`w_fused=1.0`) this whole time — the intent-conditional fix only zeroed
+buying/uncertain. A global zero-cut for browsing was already tested and
+rejected (regresses browsing −0.0118), but no intermediate value had been
+tried. Tested `[1.0, 0.85, 0.7, 0.5, 0.3, 0.15, 0.0]` against
+`stratified_halves(seed=7)` train fold (100 sessions), live tuned config as
+base: **every reduction made train strictly worse, monotonically**
+(0.8496 → 0.8398 at full zero). No missing middle ground — browsing
+genuinely needs the full signal, confirmed at finer granularity than
+before. **Not adopted.**
+
+**Hypothesis 2 — trade weight from `bm25_title`/`bm25_features` toward
+`phrase_title`/`phrase_features`.** These interact and were only ever
+tuned one-at-a-time by coordinate ascent, which can miss a jointly-better
+point. Tested a shared delta `[0.0, 0.05, 0.10, 0.15, 0.20, 0.30]` moved
+from the bm25 pair to the phrase pair. **Delta 0.15 improved train**
+(0.8496 → 0.8613, +0.0117) **but regressed holdout** (0.8747 → 0.8702,
+−0.0045) — the exact fold-disagreement `tools/tune.py` itself warns about
+("the gain is fold-specific; ship the defaults rather than these values").
+**Not adopted** — this is overfitting to the 100 train sessions, not a
+real improvement.
+
+**Net result: both well-evidenced hypotheses tested cleanly, neither
+survives holdout. `config/tuned.json` untouched — no config-path changes
+from this pass.** This is a legitimate outcome, not a failed session: it
+rules out the two most obvious reweighting fixes with real evidence,
+narrowing what's left. Recorded rather than silently dropped, per this
+file's own rule that a negative result is worth writing down.
+
+**Next things worth trying, unexplored:** (a) per-scenario or per-intent
+`w_bm25_title`/`w_bm25_features` split, rather than a global one — the
+buying-scenario share (21/39, `bm25_features +0.0826`) and the
+intent_override share (5/39, dominated by `bm25_title` AND `popularity`)
+look different enough that one global trade-off may be averaging away two
+separate problems; (b) manual inspection of a handful of the 39 sessions'
+actual title/features text (target vs. winner) to check whether there's a
+discoverable pattern (e.g. winner is a near-duplicate listing, or the
+customer's phrasing genuinely undersells the target) rather than assuming
+a global weight fix is the right shape of fix at all.
+
 **Dialogue block was untunable, and one dead method shipped (2026-08-30, Dylan Huang):**
 
 `tools/tune.py`'s `SEARCH_SPACE` had 20 parameters and zero from
