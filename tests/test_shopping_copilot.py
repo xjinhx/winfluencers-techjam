@@ -29,7 +29,12 @@ from shopping_copilot.structured import (
     check_gender,
     evaluate_all,
 )
-from shopping_copilot.text import stem, tokenize
+from shopping_copilot.text import (
+    install_plural_exceptions,
+    reset_plural_exceptions,
+    stem,
+    tokenize,
+)
 
 FIXTURE = [
     {
@@ -80,6 +85,11 @@ def build_catalog(directory: str) -> Catalog:
 
 
 class TextTests(unittest.TestCase):
+    def tearDown(self):
+        # `stem` reads module-level state; a map left installed by one test
+        # would leak into every test after it.
+        reset_plural_exceptions()
+
     def test_plural_stripping_is_conservative(self):
         self.assertEqual(stem("necklaces"), "necklace")
         self.assertEqual(stem("shorts"), "short")
@@ -91,6 +101,104 @@ class TextTests(unittest.TestCase):
         # The whole point of stemming here: the simulator says "Necklaces",
         # the title says "Necklace".
         self.assertEqual(tokenize("Necklaces"), tokenize("necklace"))
+
+    def test_uninstalled_map_keeps_the_original_rule(self):
+        # No catalog built, no exceptions installed: behaviour must be exactly
+        # what it was before the map existed, so a bare import is unaffected.
+        reset_plural_exceptions()
+        self.assertEqual(stem("hoodies"), "hoody")
+        self.assertEqual(stem("bodies"), "body")
+
+    def test_corpus_promotes_the_attested_ie_singular(self):
+        # "Hoodies" in the query, "Hoodie" in every title. The default rule
+        # sends them to 'hoody' and 'hoodie' -- two index terms whose postings
+        # never meet -- so the corpus has to break the tie.
+        install_plural_exceptions({
+            "hoodies": 1066, "hoodie": 733, "hoody": 36,
+            "booties": 183, "bootie": 608, "booty": 35,
+        })
+        self.assertEqual(stem("hoodies"), "hoodie")
+        self.assertEqual(stem("booties"), "bootie")
+        self.assertEqual(tokenize("Hoodies"), tokenize("Hoodie"))
+
+    def test_corpus_leaves_genuine_y_plurals_alone(self):
+        # The -ies -> -y rule is right far more often than it is wrong; the
+        # fix must not cost us the cases it already handles.
+        install_plural_exceptions({
+            "bodies": 51, "body": 765,
+            "babies": 231, "baby": 3500,
+            "accessories": 7188, "accessory": 111,
+        })
+        self.assertEqual(stem("bodies"), "body")
+        self.assertEqual(stem("babies"), "baby")
+        self.assertEqual(stem("accessories"), "accessory")
+
+    def test_es_is_trimmed_only_after_a_sibilant(self):
+        # 'watches' must reach 'watch'; 'capes' must not reach 'cap', which is
+        # a different garment with 709 listings of its own.
+        install_plural_exceptions({
+            "watches": 2373, "watch": 1965,
+            "boxes": 278, "box": 361,
+            "capes": 33, "cape": 76, "cap": 709,
+        })
+        self.assertEqual(stem("watches"), stem("watch"))
+        self.assertEqual(stem("boxes"), stem("box"))
+        self.assertEqual(stem("capes"), "cape")
+        self.assertNotEqual(stem("capes"), stem("cap"))
+
+    def test_ves_resolves_only_where_the_f_form_is_real(self):
+        # scarf/scarves is an f-alternation. glove/gloves only looks like one.
+        install_plural_exceptions({
+            "scarves": 523, "scarf": 407,
+            "gloves": 742, "glove": 113,
+            "sleeves": 289, "sleeve": 5529,
+        })
+        self.assertEqual(stem("scarves"), "scarf")
+        self.assertEqual(stem("gloves"), "glove")
+        self.assertEqual(stem("sleeves"), "sleeve")
+
+    def test_i_plurals_survive_the_is_guard(self):
+        # The 'is' guard exists to protect 'tennis'; it also blocked every
+        # garment whose singular ends in i.
+        install_plural_exceptions({
+            "bikinis": 345, "bikini": 434,
+            "capris": 76, "capri": 180,
+            "tennis": 434,
+        })
+        self.assertEqual(stem("bikinis"), "bikini")
+        self.assertEqual(stem("capris"), "capri")
+        self.assertEqual(stem("tennis"), "tennis")
+
+    def test_singular_ending_in_s_is_not_stripped(self):
+        # 'lens' has no attested reading as a plural, so it must not become
+        # 'len' -- that would split it right back off 'lenses'.
+        install_plural_exceptions({"lenses": 149, "lens": 125, "lense": 1})
+        self.assertEqual(stem("lens"), "lens")
+        self.assertEqual(stem("lenses"), stem("lens"))
+
+    def test_a_plural_with_a_rare_singular_still_merges(self):
+        # The identity guard above must not fire for a real plural: 'legging'
+        # is thinly attested but it is still the singular of 'leggings'.
+        install_plural_exceptions({"leggings": 500, "legging": 15})
+        self.assertEqual(stem("leggings"), stem("legging"))
+
+    def test_support_floor_rejects_thin_evidence(self):
+        # 'footie' is too rare to displace the default rule.
+        install_plural_exceptions({"footies": 101, "footie": 14, "footy": 0})
+        self.assertEqual(stem("footies"), "footy")
+
+    def test_irregular_plurals_land_on_the_attested_spelling(self):
+        install_plural_exceptions({"women": 51340, "woman": 152,
+                                   "men": 21911, "man": 114})
+        self.assertEqual(stem("woman"), stem("women"))
+        self.assertEqual(stem("man"), stem("men"))
+
+    def test_different_words_never_collide(self):
+        # 'brass' is a material and 'bras' is underwear; the -ss guard is the
+        # only thing keeping them apart.
+        install_plural_exceptions({"brass": 56, "bras": 966, "bra": 657})
+        self.assertNotEqual(stem("brass"), stem("bras"))
+        self.assertEqual(stem("bras"), "bra")
 
 
 class ParsingTests(unittest.TestCase):
