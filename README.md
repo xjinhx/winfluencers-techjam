@@ -15,25 +15,26 @@ evaluator (`evaluator/local_evaluator.py`, unmodified).
 |---|---|---|---|---|
 | Official weak BM25 baseline | 0.125 | 0.068 | 9.81 | 0.1067 |
 | Ours — default weights | 0.885 | 0.554 | 3.23 | 0.7641 |
-| **Ours — tuned** | **0.910** | **0.565** | **2.98** | **0.7848** |
+| **Ours — tuned** | **0.960** | **0.690** | **2.24** | **0.8621** |
 
 `TechnicalScore = 0.50 × HR@10 + 0.30 × MRR + 0.20 × Efficiency`
 
-A 7.4× improvement over the provided baseline, with mean turns-to-conversion
-falling from 9.81 to 2.98.
+An 8.1× improvement over the provided baseline, with mean turns-to-conversion
+falling from 9.81 to 2.24.
 
 Per scenario, tuned:
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 0.925 | 0.5505 | 2.33 |
-| browsing | 80 | 0.887 | 0.5629 | 3.09 |
-| intent override | 30 | 0.900 | 0.5500 | 4.53 |
-| boundary | 10 | 1.000 | 0.7386 | 2.70 |
+| buying | 80 | 0.975 | 0.7176 | 1.51 |
+| browsing | 80 | 0.938 | 0.5966 | 2.29 |
+| intent override | 30 | 0.967 | 0.8317 | 3.93 |
+| boundary | 10 | 1.000 | 0.7850 | 2.60 |
 
 The tuned row is fitted on a 100-session half of this same set, so it is
-optimistically biased. The unbiased estimate is the held-out half: **0.7763 →
-0.7869**. Expect the private set nearer that figure.
+optimistically biased — expect the private set below it. The split-half estimate
+last measured **0.7763 → 0.7869**, but that was taken at an earlier tuning round
+and has not been re-run against the current weights.
 
 ---
 
@@ -223,10 +224,10 @@ Runs all 200 public sessions and writes per-session results and aggregate
 metrics to `results.json`. Expected output:
 
 ```
-HR@10  0.910
-MRR    0.565
-MTTC   2.98
-TechnicalScore  0.7848
+HR@10  0.960
+MRR    0.690
+MTTC   2.24
+TechnicalScore  0.8621
 ```
 
 Tuned weights live in `config/tuned.json` and are loaded automatically by
@@ -319,15 +320,16 @@ component effects above, which is why ablations are reported on all 200.
 
 **MTTC has a structural floor we cannot cross.** Intent-override sessions cannot
 score before the changed intent appears on turn 3 or 4. With those at 15% of
-traffic, the theoretical best MTTC is 1.30 even with perfect play. Our 2.98
-includes 0.99 contributed purely by the 9% of sessions we miss entirely (misses
-are scored as turn 11); successful sessions convert at turn 2.19.
+traffic, the theoretical best MTTC is 1.30 even with perfect play. Our 2.24
+includes 0.44 contributed purely by the 4% of sessions we miss entirely (misses
+are scored as turn 11); successful sessions convert at turn 1.88.
 
-**MRR is where the remaining headroom is.** At HR@10 0.910 and MRR 0.565 we find
-the target in 91% of sessions but at mean rank 3.05 — 90 of 182 hits land at
-rank 1, but 66 land at rank 3 or worse. The remaining 0.435 of MRR is worth
-0.131 of TechnicalScore, more than the remaining HR@10 and Efficiency headroom
-combined.
+**MRR is where the remaining headroom is.** At HR@10 0.960 and MRR 0.690 we find
+the target in 96% of sessions but at mean rank 2.22 — 109 of 192 hits land at
+rank 1, and 83 land below it. The largest single bucket is rank 2: **39 sessions
+place the target exactly one position too low**, which alone is worth +0.029 of
+TechnicalScore. Reranking every hit we already retrieve to rank 1 would be worth
++0.081, more than the remaining HR@10 and Efficiency headroom combined.
 
 **Attribute vocabulary gap, unaddressed.** The nine `preference_tags` in the user
 profile are abstract (fit, material, comfort, style, durability, performance,
