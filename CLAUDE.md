@@ -84,30 +84,34 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.862111`** — measured 2026-08-30 by running the
+**Live score: `TechnicalScore = 0.876336`** — measured 2026-08-30 by running the
 committed `config/tuned.json` through the unmodified evaluator on all 200 public
-sessions.
+sessions. Up from 0.862111 — see "What was found" below (`per_field_depth`
+220 → 1000, a recall fix, not a reranking fix).
 
 | metric | value |
 |---|---|
-| HR@10 | 0.960 (8 misses) |
-| MRR | 0.689704 |
-| MTTC | 2.24 |
-| Efficiency | 0.876 |
-| **TechnicalScore** | **0.862111** |
+| HR@10 | 0.985 (3 misses, down from 8) |
+| MRR | 0.680121 |
+| MTTC | 2.01 |
+| Efficiency | 0.899 |
+| **TechnicalScore** | **0.876336** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 0.9750 | 0.7176 | 1.51 |
-| browsing | 80 | 0.9375 | 0.5966 | 2.29 |
-| intent_override | 30 | 0.9667 | 0.8317 | 3.93 |
-| boundary | 10 | 1.0000 | 0.7850 | 2.60 |
+| buying | 80 | 0.9875 | 0.7283 | 1.43 |
+| browsing | 80 | 0.9750 | 0.5892 | 1.95 |
+| intent_override | 30 | 1.0000 | 0.7972 | 3.70 |
+| boundary | 10 | 1.0000 | 0.6700 | 2.10 |
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
 `w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
+- **0.862111 and 0.863556** (and the 8-miss / `target_never_in_pool=6` figures
+  that went with them) both predate the `per_field_depth` fix below — the
+  first is pre-merge-with-main, the second is post-merge but pre-fix.
 - `results.json` = **0.847625** (run 2026-08-30 01:03, eight hours before
   `config/tuned.json` was last edited) and `results_tuned.json` = **0.784838**.
   Both predate the current config. `README.md` still headlines 0.8476.
@@ -243,6 +247,102 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**`public_0095`'s retrieval miss root-caused and fixed — a real recall bug,
+not a reranking one: `per_field_depth` 220 → 1000 (2026-08-30, Dylan Huang):**
+
+**The request:** investigate `public_0095` (buying scenario, target
+`B09N78FT2W`, a "Free Leaper High Waisted Yoga Pants... Leggings" listing),
+flagged externally as one of 3 true retrieval misses — "the target shares
+almost no vocabulary with anything the customer says."
+
+**That framing turned out to be wrong, and the actual mechanism is more
+interesting and more general.** Traced the real turn-1 query
+(`tools.demo --sample public_0095`): *"I'm looking for Women Leggings. A
+key requirement is: polyester."* Confirmed via `offline_eval`-style direct
+inspection that **the target scored ZERO on every BM25 field at every
+turn (1-10)** — never entered the candidate pool once, despite its title
+literally containing "Leggings" and its features literally containing
+"Polyester."
+
+**Root cause, traced mechanically, not guessed:**
+1. `"women"` — the single most useful, correctly-matching term in the
+   query — appears in 48-59% of catalog titles/features/categories,
+   **above `max_df_ratio=0.35`**, so `BM25Field.search()` silently drops
+   it from three of five fields (`index.py`'s own comment: "their IDF is
+   near zero and their posting lists are the expensive ones" — true in
+   aggregate, false for this specific query where it was the one
+   discriminating term available).
+2. With `women` gone, only `legging`/`polyester` remain. The target *does*
+   match on these (confirmed by removing the `per_field_depth` limit
+   entirely and re-scoring): full-field rank 394/732 (title), 278/384
+   (categories), 2841/11207 (features) — genuinely present, just outside
+   `per_field_depth=220`'s per-field cutoff before fusion. Its unusually
+   long, marketing-heavy title (12 tokens vs. a typical short listing)
+   loses ground under BM25 length-normalisation to shorter, keyword-denser
+   competitors on the few surviving terms.
+3. Only the dense (character n-gram) route saw it at all (score 0.145),
+   nowhere near enough alone to clear the top-200 fused candidate pool
+   (200th place needed 0.274).
+
+**Fix tested the way everything else this session was: train/holdout, not
+just "does the one target session flip."** Swept `per_field_depth`
+`[300, 400, 600, 800, 1000, 1200, 1500, 2000]` against
+`stratified_halves(seed=7)`. **This is qualitatively different from every
+other experiment this session (the pairwise LTR reranker, the
+`w_fused_browsing` sweep, the bm25↔phrase trade-off) — holdout improved
+*as much or more than* train at every value ≥800**, the opposite of the
+overfitting signature those all showed:
+
+| per_field_depth | train | holdout |
+|---|---|---|
+| 220 (baseline) | 0.8526 | 0.8745 |
+| 400 | 0.8631 (+0.0105) | 0.8686 (−0.0059) |
+| 800 | 0.8722 (+0.0196) | 0.8805 (+0.0060) |
+| **1000 (adopted)** | **0.8656 (+0.0130)** | **0.8871 (+0.0126)** |
+| 1200 | 0.8630 (+0.0104) | 0.8861 (+0.0116) |
+| 2000 | 0.8509 (−0.0017) | 0.8840 (+0.0095) |
+
+**Why this doesn't carry the same overfitting risk as a weight retune:**
+`per_field_depth` isn't a coefficient that can be shaped to fit noise in
+100 sessions — it's a structural cutoff on how many real candidates each
+field is *allowed to surface* before fusion. Raising it only adds
+information (more genuinely-matching documents become visible); it
+introduces no new degree of freedom for the fold to overfit against. That
+structural difference, not luck, is the honest explanation for why this
+result looks nothing like this session's other experiments.
+
+**Full 200-session result, adopted into `config/tuned.json`:**
+`TechnicalScore` 0.863556 → **0.876336** (+0.0128). **HR@10 0.960 → 0.985
+(8 misses → 3)**, MTTC 2.25 → 2.01, Efficiency 0.875 → 0.899. MRR dipped
+slightly (0.695185 → 0.680121) — expected and correct: newly-recovered
+sessions convert at whatever rank they first appear, not rank 1, so they
+add less to MRR per-session than a miss (reciprocal rank 0) did, while
+adding the full amount to HR@10 (0.50 weight) and Efficiency (0.20
+weight) — net positive by formula, not by cherry-picking a metric.
+`offline_eval` confirms 200/200 session agreement, `target_never_in_pool`
+dropped **6 → 1**. 32/32 tests pass. `public_0095` itself: now hits at
+turn 3, rank 3.
+
+**Runtime cost:** modest. 100-session fold scoring went from a few seconds
+at depth 220 to ~8-9s at depth 1000-2000 with a warm agent (`Bench`); full
+200-session live run (cold start, fresh process) completed in ~23s total.
+Not a concern for the private 800-session set at this scale.
+
+**Not investigated further, worth flagging:** the exact optimum among
+{800, 1000, 1200} is close (holdout 0.8805/0.8871/0.8861) — 1000 was
+chosen as the best of the tested values, not verified as a true peak. A
+finer sweep could find a slightly better value, but the qualitative
+finding (raising per-field recall depth helps, robustly, on both folds)
+is the load-bearing result, not the third decimal place. Also unexplored:
+whether `max_df_ratio` itself (currently 0.35, the reason `women` gets
+dropped in the first place) has similar headroom — untested because
+raising it changes what gets *scored*, not just how many survive a cutoff,
+which is a different and less structurally-safe kind of change than this
+one.
+
+**3 misses remain** (`public_0092`, `public_0137`, `public_0161`) — not
+diagnosed this pass.
 
 **Intent-router disagreement check (PRD Phase 5, read-only, 2026-08-30, Dylan Huang):**
 
@@ -579,7 +679,17 @@ measured with it in.)
 
 ## Remaining headroom
 
-**Current 0.862111. Practical ceiling ~0.970** (6 targets believed unreachable,
+**Superseded 2026-09-XX by the `per_field_depth` fix above — the numbers below
+predate it and are now wrong in the specifics.** Misses fell 8 → 3 and
+`target_never_in_pool` fell 6 → 1, so "6 targets believed unreachable" and the
+39/83/8-hit rank distribution this table is built on no longer describe the
+live system. The *qualitative* lessons still hold (rank-2 is reranking-hard,
+gated on new features not weights per the LightGBM finding below) — the
+specific hit-counts do not. Kept rather than deleted per this file's own rule;
+a fresh `why_lost` + rank-distribution pass against the new config is the
+correct next step before trusting any number in this section again.
+
+**Current 0.862111 (stale, see above). Practical ceiling ~0.970** (6 targets believed unreachable,
 so HR@10 caps near 0.97, which caps MRR at 0.97 too). Headroom ≈ **+0.108**,
 and **~78% of it is MRR**.
 

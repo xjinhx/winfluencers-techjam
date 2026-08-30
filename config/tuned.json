@@ -14,7 +14,7 @@
     "max_df_ratio": 0.35,
     "max_query_terms": 48,
     "fusion_alpha": 0.78,
-    "per_field_depth": 220,
+    "per_field_depth": 1000,
     "candidate_depth": 200,
     "rerank_depth": 200,
     "enable_dense": true,
