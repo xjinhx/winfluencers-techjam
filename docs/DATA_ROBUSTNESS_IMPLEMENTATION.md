@@ -3,7 +3,7 @@
 Branch: `dylan-data-error`
 Status: Implementation complete and verified. This is a **verification report**, not a design document — every number below was produced by actually running the current repository's code, not recalled from a prior plan.
 
-Source material: [docs/PHASE1_DATA_AUDIT.md](PHASE1_DATA_AUDIT.md), [docs/PHASE2_FAILURE_AUDIT.md](PHASE2_FAILURE_AUDIT.md), `docs/CLAUDE_CODE_HANDOFF.md`, [docs/PHASE3_DESIGN.md](PHASE3_DESIGN.md), the final `evaluator/local_evaluator.py` and `tests/test_evaluator.py`, and freshly re-run test/evaluation output (re-verified at the time this report was written, not reused from earlier in the conversation).
+Source material: the prior phase's data audit, failure audit, and design documents (since superseded and removed from the repo), the final `evaluator/local_evaluator.py` and `tests/test_evaluator.py`, and freshly re-run test/evaluation output (re-verified at the time this report was written, not reused from earlier in the conversation).
 
 ---
 
