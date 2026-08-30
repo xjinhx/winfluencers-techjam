@@ -258,6 +258,83 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**`public_0100` diagnosed and a targeted fix tested — rejected, and the
+rejection revealed a different, harder problem than `per_field_depth`
+(2026-08-30, Dylan Huang, branch `fix/public-0100-candidate-depth`):**
+
+**The request:** of the 3 misses remaining after the `per_field_depth`
+fix, root-cause `public_0100` specifically (browsing scenario, target
+`B002OHE4D6`, a men's Dockers leather loafer).
+
+**Diagnosis, traced directly, not guessed:** turn 1's query ("I'm looking
+for Shoes Loafers & Slip-Ons, but I'm still exploring.") already ranks the
+target well inside every per-field cutoff — `categories` rank 23/808,
+`title` rank 312/5355, both comfortably under `per_field_depth=800`. The
+apparent bottleneck at turn 1 was the aggregate fusion cutoff instead:
+uncapped fused rank 294/2417, just outside `candidate_depth=200`.
+Unlike `per_field_depth`, this is squarely `RetrievalConfig.candidate_depth`
+territory — a genuinely different lever from the earlier fix.
+
+**A real code detail surfaced along the way:** `agent.py` does
+`candidate_ids = top_n(fused, candidate_depth)` then
+`candidate_ids[:rerank_depth]` — since `rerank_depth` currently equals
+`candidate_depth` (200==200), raising one alone does nothing; both must
+move together for the change to take effect at all.
+
+**Tested exactly like the `per_field_depth` fix — grid swept against
+`stratified_halves(seed=7)`, `candidate_depth`/`rerank_depth` moved
+together:**
+
+| depth | train | holdout | 100-session time |
+|---|---|---|---|
+| 200 (baseline) | 0.8722 | 0.8805 | ~9s |
+| 250 | 0.8714 (−0.0008) | 0.8748 (−0.0057) | ~10.5s |
+| 300 | 0.8696 (−0.0026) | 0.8721 (−0.0084) | ~11.3s |
+| 400 | 0.8788 (+0.0067) | 0.8728 (−0.0077) | ~10.8s |
+| 500 | 0.8788 (+0.0067) | 0.8719 (−0.0086) | ~13.1s |
+| 800 | 0.8789 (+0.0067) | 0.8706 (−0.0099) | ~17.7s |
+
+**Every single value regressed holdout, monotonically worse at higher
+depths — the same signature as the rejected pairwise-LTR and weight-tuning
+experiments, not the `per_field_depth` result.** Also, unlike
+`per_field_depth`, this one carries a real, growing timing cost (9s → 17.7s
+per 100-session fold at depth 800 — roughly double, since raising
+`rerank_depth` scales the expensive per-candidate feature-extraction +
+scoring path, not just a cheap pre-fusion BM25 cutoff).
+
+**Confirmatory check — and this is the important part: `public_0100`
+itself never flips, at any tested depth, including 800.** Traced the full
+10-turn transcript at `candidate_depth=800`: by turn 8 the session's
+top-5 is `Bruno Marc Men's Leather Lined Dress Loafers`, `Stacy Adams
+Men's Flynn Moc-Toe Bit Slip-On Loafer`, `Go Tour Men's Premium Genuine
+Leather Casual Slip-On Loafers` — several genuinely similar, legitimate
+men's leather dress loafers the customer's disclosed constraints
+(material, brand) don't distinguish from the actual target. **This is not
+a pool-depth problem at all once enough turns pass — it's the
+reranker failing to discriminate among several near-identical
+competitors, the same class of problem as the already-investigated (and
+already-rejected, see the LambdaMART/separability entry) rank-2
+reranking problem.** The turn-1 candidate_depth analysis above was real
+and correctly diagnosed turn 1, but doesn't explain why the miss persists
+through turn 10 — a materially incomplete picture that only surfaced by
+tracing the full transcript, not just turn 1.
+
+**Rejected. `config/tuned.json` untouched.** Per the same discipline as
+every other experiment this session: a regression on holdout is a reason
+not to ship, not a reason to keep searching for a luckier value.
+
+**Bonus check (not diagnostic):** at `candidate_depth=300`, `public_0092`
+and `public_0137` are also still misses — observed in the same replay,
+not separately diagnosed. Do not treat this as evidence about their root
+cause; they have not been traced the way `public_0095`/`public_0100` were.
+
+**What this changes about the remaining-misses picture:** `public_0100`
+is now understood to need a *feature* (something that discriminates
+between very similar men's leather loafers), not a *depth* parameter —
+squarely in the same "needs new information in the vector, not a better
+cutoff or weight" category the rank-2 finding already established.
+`public_0092` and `public_0137` remain genuinely undiagnosed.
+
 **Reconciled with Joey's independent `per_field_depth=800` + NQC confidence
 change (2026-08-30, Dylan Huang):** `main` moved again after the entry below
 was written — Joey independently landed `per_field_depth=800` (same lever,
