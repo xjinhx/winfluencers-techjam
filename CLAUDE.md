@@ -161,9 +161,13 @@ Each of these will corrupt an offline analysis if got wrong, without erroring.
 - **`best_rank` is first-hit-in-top-10, not full-pool rank.** For
   `intent_override` sessions, any hit before the override turn is ignored
   (`local_evaluator.py:234,252`).
-- **Unknown-penalty is applied outside the model** (`ranking.py:120-129`).
-  Three of six non-zero under the tuned config: gender −0.01, category −0.005,
-  price −0.005. Scoring with `LinearModel` alone will not reproduce ordering.
+- **Unknown-penalty is a first-class feature, not a post-hoc adjustment**
+  (as of 2026-08-30 — folded into `features.py`'s `{dim}_unknown` columns and
+  `ranking.py:build_linear_weights`, see "What was found" above). Three of
+  six non-zero under the tuned config: gender −0.01, category −0.005, price
+  −0.005. `LinearModel` alone now correctly reproduces ordering — this used
+  to require a separate additive step, and any doc/tool assuming otherwise
+  is stale.
 - **MMR is disabled** (`enable_mmr = False`). Ties break on `parent_asin`.
 - **`difficulty_bucket` is deterministic from `scenario_type`**
   (buying→easy, browsing→medium, intent_override→hard, boundary→medium).
@@ -232,6 +236,74 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**Pairwise learning-to-rank experiment: implemented, tested across a
+hyperparameter grid, rejected with strong evidence (2026-08-30, Dylan Huang):**
+
+Per `PRD-ML-reranker.md`'s staged plan, on branch `dylan-ltr-reranker`.
+
+**Phase 2 (prerequisite, shipped):** folded the constraint unknown-penalty
+into the feature vector as 6 first-class `{dimension}_unknown` columns
+(`features.py`), removing the post-hoc additive adjustment in
+`Ranker.score_candidate` (`ranking.py`). `FEATURE_NAMES` grew 30 → 36.
+Verified score-neutral: 32/32 tests pass, full live evaluator run
+reproduces `TechnicalScore = 0.862111` exactly. **Caught and fixed a
+second-order bug while doing this:** `tools/offline_eval.py`'s
+`ReplayScorer` independently reimplements the scoring path and still had
+the old post-hoc penalty loop — left alone, it would have silently
+double-counted the penalty on every future replay/`why_lost` run. Fixed
+and reverified (200/200 session agreement, `why_lost --ranks 2` reproduces
+identical numbers to before the fix).
+
+**Phase 3 (the actual experiment): rejected.** Built `tools/train_pairwise.py`
+— a stdlib-only pairwise-logistic fit (no numpy, hand-rolled SGD) over the
+same 36 features minus `fused` (deliberately frozen — it's under the
+already-validated intent-conditional mechanism and `ScoringModel.score()`
+has no intent parameter to make a per-intent fused weight correct) and
+minus `bm25_description`/`bm25_store` (not real tunable fields — hardcoded
+to 0.0 in `build_linear_weights()`, so training a weight for them and
+discarding it at config-write time would be a train/eval mismatch, caught
+before it mattered). L2-regularized **toward the current tuned weights**,
+not toward zero — a small correction, not a from-scratch fit. 1,038 pairs
+mined from 100 train-fold sessions (target vs. every candidate currently
+outranking it — same construction `tools.why_lost` already uses).
+
+Tested across 6 hyperparameter settings, aggressive to conservative:
+
+```
+lr=0.02  l2=0.08 epochs=40  train +0.0000→-0.1183  holdout -0.0956  (initial run, before a minor fix)
+lr=0.02  l2=0.08 epochs=40  train -0.1182           holdout -0.0955  (after excluding frozen bm25_description/store)
+lr=0.003 l2=0.5  epochs=10  train +0.0087           holdout -0.0137
+lr=0.005 l2=0.4  epochs=12  train +0.0048           holdout -0.0173
+lr=0.003 l2=0.3  epochs=15  train +0.0042           holdout -0.0219
+lr=0.002 l2=0.2  epochs=20  train -0.0108           holdout -0.0224
+lr=0.001 l2=1.0  epochs=5   train +0.0101           holdout -0.0032  (gentlest tested)
+```
+
+**Every single setting regressed holdout, monotonically worse as more
+freedom was given to the fit** — the more the weights were allowed to move
+from the tuned baseline, the worse holdout got, even as train sometimes
+looked slightly better. This is a clean, textbook overfitting signature
+(not a bug — verified the gradient math is directionally correct via the
+gentlest setting, and not noise — the pattern is monotonic across the
+entire grid), and it is exactly the failure mode this session's earlier
+`w_fused_browsing`/bm25-phrase experiments already demonstrated with far
+fewer free parameters. **Stopped the hyperparameter search deliberately at
+6 points rather than continuing to hunt for a lucky setting** — further
+search would itself be exactly the selection-on-noise problem this file's
+own measurement-discipline section warns about.
+
+**Net result: 100 train-fold sessions do not support jointly refitting 33
+linear weights, even with strong L2 shrinkage toward a known-good starting
+point.** This is the same conclusion the research report's data-honesty
+section (§7 of `ML-Research-Report.md`) predicted before any code was
+written — this experiment is the empirical confirmation of that prediction,
+not a new surprise. `config/tuned.json` untouched throughout — every trial
+scored a scratch config copy via `evalkit.Bench`, never the live one.
+Per the PRD's own stop criterion, Phase 6 (integration) does not happen.
+`tools/train_pairwise.py` is kept in the repo as a reusable diagnostic —
+useful again if the private 800-session set or a future data refresh ever
+changes the "not enough data" conclusion.
 
 **Rank-2 diagnostic run; two well-motivated fixes tested, neither survives holdout (2026-08-30, Dylan Huang):**
 
