@@ -28,7 +28,7 @@ from pathlib import Path
 
 from shopping_copilot.config import Config
 from shopping_copilot.features import FEATURE_NAMES
-from shopping_copilot.ranking import build_linear_weights
+from shopping_copilot.ranking import INTENT_OVERRIDABLE, build_linear_weights
 
 from tools.offline_eval import (
     join_by_order,
@@ -64,9 +64,10 @@ def gap_rows(groups, joined, scorer, weights, ranks, max_winners, config_ranking
 
         turn_intent = rows[0].get("intent")
         turn_weights = dict(weights)
-        override = getattr(config_ranking, f"w_fused_{turn_intent}", None)
-        if override is not None:
-            turn_weights["fused"] = override
+        for feature in INTENT_OVERRIDABLE:
+            override = getattr(config_ranking, f"w_{feature}_{turn_intent}", None)
+            if override is not None:
+                turn_weights[feature] = override
 
         target = label["target"]
         target_vec = vectors[target]

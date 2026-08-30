@@ -26,3 +26,4 @@ tuning.log
 # Internal diagnostic working documents (findings summarised in CLAUDE.md).
 PRD_rank_diagnostic.md
 docs/rank_diagnostic.md
+PRD_pairwise_rerank.md

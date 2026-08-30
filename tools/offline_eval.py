@@ -24,7 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from shopping_copilot.config import Config
-from shopping_copilot.ranking import LinearModel, build_linear_weights
+from shopping_copilot.ranking import INTENT_OVERRIDABLE, LinearModel, build_linear_weights
 
 TOP_K = 10
 MAX_TURNS = 10
@@ -111,16 +111,22 @@ class ReplayScorer:
     def __init__(self, config: Config) -> None:
         base = build_linear_weights(config.ranking, config.priors, config.constraints)
         self.model = LinearModel(base)
-        # Mirrors `Ranker.intent_models`: a per-intent fusion weight, so a replay
-        # of an intent-conditional config ranks the way the live agent does.
+        # Mirrors `Ranker.intent_models`: any of INTENT_OVERRIDABLE may carry
+        # a per-intent weight, so a replay of an intent-conditional config
+        # ranks the way the live agent does.
         self.intent_models: dict[str, LinearModel] = {}
         for intent in ("buying", "browsing", "uncertain"):
-            override = getattr(config.ranking, f"w_fused_{intent}", None)
-            if override is None or override == config.ranking.w_fused:
-                continue
-            weights = dict(base)
-            weights["fused"] = override
-            self.intent_models[intent] = LinearModel(weights)
+            weights: dict[str, float] | None = None
+            for feature in INTENT_OVERRIDABLE:
+                default = getattr(config.ranking, f"w_{feature}")
+                override = getattr(config.ranking, f"w_{feature}_{intent}", None)
+                if override is None or override == default:
+                    continue
+                if weights is None:
+                    weights = dict(base)
+                weights[feature] = override
+            if weights is not None:
+                self.intent_models[intent] = LinearModel(weights)
 
     def __call__(self, vector: list[float], intent: str | None = None) -> float:
         return self.intent_models.get(intent, self.model).score(vector)

@@ -143,9 +143,13 @@ is no longer an open decision, and any doc saying otherwise is stale.
    (`features_*.jsonl`) are large but are the only way to replay and audit a
    change. Keep them until `offline_eval` confirms the result, then archive or
    delete deliberately. They regenerate in ~3 minutes if lost.
-8. **Do not commit a change worth less than the noise floor.** ~+0.05 MRR on
-   this 200-session set. See "Measurement discipline" — this is the single
-   easiest way to ship a regression that looks like a win.
+8. **State the uncertainty next to every claimed gain.** Single-run SE is
+   ~0.029 on this 200-session set, so a change smaller than roughly that cannot
+   be *verified* here — but it is not thereby refused. The private set is 800
+   sessions, where SE is about half, so a real +0.02 can show up there even
+   though this set cannot prove it. What is forbidden is quoting a gain without
+   saying whether it survives holdout: report the fold-B number alongside it,
+   and say plainly when a result is below the verification threshold.
 
 ## Critical evaluator facts (silent-corruption risks)
 
@@ -188,8 +192,11 @@ MRR optimizes only the smallest term. Always decompose before committing.
 ## Measurement discipline (critical)
 
 - **Paired MRR SE ~0.024** across 200 sessions (bootstrap, 20k resamples).
-  Single-run SE ~0.029. A change worth less than ~+0.05 MRR is indistinguishable
-  from noise on this set.
+  Single-run SE ~0.029. A change worth less than ~+0.05 MRR cannot be
+  distinguished from noise **on this set** — a statement about what 200 sessions
+  can measure, not about whether the change is real. Report such a result as
+  unverified rather than discarding it; the 800-session private set has roughly
+  half this noise.
 - **Report the sign test and the CI together.** They often disagree; a solid
   direction with a non-significant CI is plausible but not proven. Report both,
   not whichever one looks better.
@@ -259,8 +266,14 @@ density/marker-score above the 0.65 buying threshold despite being labeled
 browsing, rather than retuning the router generally.
 
 **Pairwise learning-to-rank experiment: implemented, tested across a
-**Pairwise learning-to-rank experiment: implemented, tested across a
 hyperparameter grid, rejected with strong evidence (2026-08-30, Dylan Huang):**
+
+**This independently reaches the same conclusion as He Jinhong's much more
+thorough sweep below (sklearn + LightGBM, 7 methods) — read that entry
+first for the definitive answer** (including *why* it fails: the 39 rank-2
+sessions are linearly separable in isolation but not jointly with the 109
+already at rank 1). This entry is kept as a second, independent
+confirmation via a different, dependency-free method, not a duplicate.
 
 Per `PRD-ML-reranker.md`'s staged plan, on branch `dylan-ltr-reranker`.
 
@@ -326,6 +339,89 @@ Per the PRD's own stop criterion, Phase 6 (integration) does not happen.
 `tools/train_pairwise.py` is kept in the repo as a reusable diagnostic —
 useful again if the private 800-session set or a future data refresh ever
 changes the "not enough data" conclusion.
+
+**Learned reranking closed: seven attempts including LambdaMART, none beats the
+incumbent on held-out data (2026-08-30, He Jinhong):**
+
+Built the separability gate from `PRD_pairwise_rerank.md` Step 3 and ran the
+whole comparison offline. **Conclusion: no linear reranker over the current
+feature vector improves held-out performance, regardless of objective. Every
+attempt regressed fold B — a direction failure, not a margin failure. Do not
+rebuild this.** `config/tuned.json` and `results.json` untouched throughout.
+
+**What was tested, and the numbers:**
+
+| attempt | search procedure | fold A (fitted) | fold B (held out) |
+|---|---|---|---|
+| `w_fused_browsing` (Dylan H1) | grid over 7 values | monotonically worse | — |
+| bm25→phrase delta (Dylan H2) | coordinate ascent, shared delta | +0.0117 | −0.0045 |
+| generic pairwise | hand-rolled logistic, 855 pairs | +0.0116 | −0.0503 |
+| payoff-weighted pairwise | hand-rolled, pairs weighted by TechnicalScore delta | +0.0044 | −0.0716 |
+| CLiMF | smooth RR lower bound | +0.0010 | −0.0430 |
+| **regularised pairwise** | **sklearn `LogisticRegression`, C swept 1e-3..1e2, selected by inner validation inside fold A** | **+0.0257** | **−0.0458** |
+| **LambdaMART** | **LightGBM `lambdarank`, 8 configs (`num_leaves` 2-15, 15-200 trees), same inner validation** | **+0.0175** | **−0.0080** |
+
+**The bound that matters: the best in-sample gain any method achieved is
++0.0257** — model fitted directly on the fold being scored, zero generalisation
+loss. **Every one of the six regressed fold B**, by −0.0045 to −0.0716 — the
+problem is direction, not margin. The in-sample ceiling is recorded so the next
+person knows the size of the prize before spending anything on it, not as a
+threshold anything failed to clear.
+
+**LightGBM is the best of the seven, and still not a gain.** LambdaMART reached
+fold B **−0.0080** — inside noise, i.e. a *tie* with the incumbent, against
+−0.0430 to −0.0716 for every linear attempt. That is the predicted result of the
+joint-infeasibility finding below: no single weight vector can win the 39 rank-2
+pairs while keeping the 109 already at rank 1, but a tree ensemble is not
+restricted to one global direction and can carve the space. So trees genuinely
+help with the *conflict* — they just have no new information to exploit.
+Across eight configurations spanning `num_leaves` 2-15 and 15-200 trees, **not
+one beat the incumbent on inner validation** (best A2 0.7667 vs 0.8037), and the
+score was flat-to-worse across the whole capacity range. That is the profile of
+no signal left to extract, not of an undertuned model. Shipping it would also
+mean a runtime dependency, or a tree-dump walker, for a result that is at best a
+wash.
+
+**The cleanest evidence needed no holdout at all.** In the sklearn run, fold A
+was split again (A1/A2, seed 11) and every one of twelve configurations — six
+regularisation strengths × two weightings — scored **below the incumbent** on
+A2 (best 0.7820 vs incumbent 0.8037). The selection procedure never found a
+model worth promoting, before fold B was looked at once. The sweep also selected
+`C=100`, the *weakest* regularisation offered, which is the overfitting
+signature rather than a cure for it.
+
+**Why it fails, mechanically.** The rank-2 diagnostic (entry below) showed the
+imposter genuinely out-BM25s the target and all 12 constraint columns contribute
+exactly 0.0% of the gap. The separating information is not in the vector, so no
+reweighting recovers it. Two useful sub-results from the gate:
+
+- **The 39 rank-2 pairs *are* linearly separable in isolation** (perceptron, 4
+  epochs), and this is real signal, not a dimensionality artifact — only 1/20
+  randomly sign-flipped control sets were also separable.
+- **But not jointly with the 109 sessions already at rank 1.** Best joint fit:
+  30/39 rank-2 fixed while losing 6/109 rank-1, ≈ +0.018 in-sample. Winning the
+  39 requires inverting `popularity` / `bm25_title` / `bm25_features`, which is
+  precisely what destroys the sessions already won.
+
+**Caveat, recorded honestly:** the payoff objective sat flat at 0.6080 across
+five of six C values, suggesting its weights are so skewed toward the single
+fold-A miss session that most pairs are effectively ignored. It is fairly
+judged "not viable as specified", not "refuted in principle" — but it would have
+to close a 3× gap and it starts furthest away.
+
+**What this retires:** the GBDT / LambdaRank line for these cases too — and that
+is now *measured*, not inferred, since LightGBM was actually run (row 7 above).
+The blocker was never the learner.
+
+**What to do instead:** a new feature. The unexplored next step is to read the
+actual `title`/`features` text of the 39 rank-2 targets against their winners and
+find what distinguishes them, rather than assuming a global weight fix is the
+right shape of fix at all.
+
+**Artifacts:** `tools/separability.py` (the gate, stdlib-only, reusable for any
+rank bucket). The trainer, comparison harness and `ranking.model_path` config
+field described in `PRD_pairwise_rerank.md` were **never built** — the gate
+answered the question first, which was its purpose.
 
 **Rank-2 diagnostic run; two well-motivated fixes tested, neither survives holdout (2026-08-30, Dylan Huang):**
 
@@ -498,35 +594,72 @@ Recomputed 2026-08-30 from the live run's per-session `best_rank` distribution
 | perfect rerank of every hit we already find | 83 | **+0.0811** |
 | converting all 8 misses | 8 | ~+0.035 (HR@10 +0.02, MRR +0.012, plus MTTC) |
 
-**Rank 2 is where the work is.** 39 sessions retrieve the target and place it
-one position off. That is 20% of the whole set losing half its reciprocal rank
-to a single swap — a bigger, more concentrated target than anything else on the
-board, and it is a pure reranking problem, not a retrieval one.
+**Rank 2 is the biggest bucket, but it is not reachable by reweighting.** 39
+sessions retrieve the target and place it one position off. The table above is
+what those swaps are *worth*, not what is *available* — seven reranking attempts
+have now failed against them, LightGBM `lambdarank` included (see "What was
+found"), so treat every row here as gated on the feature vector gaining new
+information, not on a better weighting or a better learner.
+
+The measured bound: any linear scorer that wins all 39 rank-2 pairs must invert
+`popularity` / `bm25_title` / `bm25_features`, which loses sessions already at
+rank 1. Best joint result was 30/39 fixed against 6/109 lost, ≈ +0.018 in
+sample.
 
 **The 8 misses** split browsing 5 / buying 2 / intent_override 1. Browsing is
 the weakest track on every metric (HR@10 0.9375, MRR 0.5966) and is where the
-remaining recall loss lives.
+remaining recall loss lives. **This is the least-explored row in the table** and
+the one not yet ruled out by anything.
 
-**Next step:** run `why_lost --ranks 2` against a fresh trace. The old
-diagnostic targeted ranks 3,4,5 when the distribution was flatter; rank 2 now
-dominates and has never been diagnosed on its own.
+**Next step:** read the actual `title`/`features` text for the 39 rank-2 targets
+against their winners and find what distinguishes them — a feature question, not
+a weighting question. `tools/separability.py` will re-answer the bound for any
+new feature set in seconds once a trace exists.
 
-## Gradient boosting future work (LambdaRank / LightGBM)
+## Gradient boosting — TESTED 2026-08-30, does not help
 
-**Assessed and deferred, not rejected.** In scope per the rules ("local scoring
-logic" is explicitly in; "training base foundational LLMs" is out).
+**No longer future work: it was built and measured.** LightGBM `LGBMRanker`
+with `objective="lambdarank"`, grouped by session, fitted on fold A with
+hyperparameters selected by inner validation inside fold A (fold B untouched
+until the final measurement).
 
-**Two blockers before building a GBDT:**
-1. **The feature-weighting defect still exists.** A GBDT trained on current
-   vectors would inherit the double-counted fused signal. Retrain only against
-   corrected weights. Freeze the retriever first — negatives are mined from its
-   own output, so a retriever change invalidates training data retroactively.
-2. **The unknown-penalty is post-hoc.** It is a hand-tuned additive constant on
-   the `LinearModel` output scale; a GBDT's raw output is not on that scale.
-   Fold the penalty into the feature vector first, or the model will look
-   underperforming when it is actually correct.
+```
+              HR@10      MRR    MTTC     Score
+fold A inc   0.9500   0.6745   2.390   0.8496
+fold A lgbm  0.9500   0.7201   2.200   0.8670   +0.0175
+fold B inc   0.9700   0.7049   2.090   0.8747
+fold B lgbm  0.9500   0.7136   2.120   0.8667   -0.0080
+```
 
-Also note Critical rule 5 — LightGBM breaks the stdlib-only guarantee.
+**Result: a tie, not a gain.** −0.0080 on fold B is inside noise. Eight
+configurations were tried (`num_leaves` 2-15, 15-200 trees, `min_child_samples`
+10-80); **none beat the incumbent on inner validation** (best A2 0.7667 vs
+0.8037), and the score was flat-to-worse across the entire capacity range —
+the signature of no remaining signal, not of undertuning.
+
+**Worth recording as a positive finding:** trees are the best learned result of
+the seven attempts by a wide margin (−0.0080 against −0.0430 to −0.0716 for
+every linear model). That is exactly what the joint-infeasibility result
+predicts — no single weight vector can win the 39 rank-2 pairs while keeping the
+109 already at rank 1, and a tree ensemble is not restricted to one global
+direction. **Trees solve the conflict; they cannot manufacture the missing
+information.**
+
+**Two things a future attempt must not re-derive:**
+1. **A pairwise setup does not transfer to trees.** For a linear model
+   `w·(a−b) = w·a − w·b`, so training on difference vectors yields a pointwise
+   scorer for free. For a tree `f(a−b) ≠ f(a) − f(b)` — LambdaRank proper is
+   required (pointwise scorer, pairwise-derived gradients), which sklearn does
+   not provide and LightGBM does.
+2. **The unknown-penalty problem is solved.** `tools/separability.py:augment()`
+   derives the six `{dim}_unknown` indicators from the existing vector inside the
+   trainer, so `FEATURE_NAMES` never has to change. Reuse it.
+
+**Reopen only if the feature vector gains real discriminating information** —
+e.g. from the clarification work. Trees over the same 30 columns have been
+measured and do not pay. Note also that shipping LightGBM means a runtime
+dependency or a tree-dump walker, which is a real cost for a result that is at
+best a wash.
 
 ---
 
@@ -536,18 +669,20 @@ Measured against the live 0.862111, not `docs/pending.md`'s 0.7848-era figures.
 
 | priority | item | impact | notes |
 |----------|------|--------|-------|
-| **high** | **Rank 2 → 1 recovery** | **+0.0292** | 39 sessions, one swap each. Pure reranking. Never diagnosed on its own — `why_lost --ranks 2` |
-| high | Tune the dialogue block (`pending.md` P0) | unmeasured | still true and still untouched: `SEARCH_SPACE` in `tools/tune.py` has 20 params, **zero** from `dialogue`, though clarification ablates to −0.4473. Prerequisite: promote `state.observe(override_decay=)` and `state.query(recency_bonus=)` to `DialogueConfig` |
-| high | Full GBDT / LambdaRank (P2) | up to +0.0811 | that is the perfect-rerank bound. Needs frozen retriever + penalty folded into features first — see below |
-| medium | Browsing recall | ~+0.02 | 5 of 8 misses and the worst MRR (0.5966) are browsing |
-| medium | Ranks 6-10 → 1 | +0.0246 | 19 sessions, likely the same fix as rank 2 |
+| **high** | **New feature for the rank-2 cases** | ≤ +0.0292 | the only remaining route to those 39 sessions. Reweighting is closed (see "What was found"). Start by reading the actual `title`/`features` text of target vs. winner for the 39 |
+| high | Browsing recall | ~+0.02 | 5 of 8 misses and the worst MRR (0.5966) are browsing. Untouched |
+| medium | Ranks 6-10 → 1 | +0.0246 | 19 sessions. Same caveat as rank 2 — assume a feature problem until a diagnostic says otherwise |
 | low | Learn `TAG_LEXICON` instead of hand-writing it (P4) | +0.0010 measured | `profile.py:22`; the feature it feeds ablates to inert |
 | low | Decide the fate of the two inert components (P5) | ±0.002 | still undecided; both still shipped |
+| ~~closed~~ | ~~Rank 2 → 1 by a learned reranker~~ | — | **seven attempts (5 linear, 1 sklearn, 1 LambdaMART). Best held-out result is LightGBM at −0.0080, a tie; every linear one regresses −0.0430 to −0.0716. Do not rebuild** |
+| ~~closed~~ | ~~Tune the dialogue block (P0)~~ | — | done; both promoted parameters were already optimal on the grid tested |
+| ~~closed~~ | ~~GBDT / LambdaRank (P2)~~ | — | **tested: LightGBM lambdarank, fold B −0.0080 (a tie), 8 configs, none beat the incumbent on inner validation. Reopen only if the features gain new information** |
 
 **`docs/pending.md` status** (written at 0.7848, so treat its numbers as
-historical): P0 untouched · P1 **done**, though via per-intent ranking weights
-rather than the retrieval multipliers it proposed · P2 untouched · P3 diagnosed
-but superseded (18 misses → 8) · P4 untouched · P5 undecided.
+historical): P0 **done, no gain** · P1 **done**, via per-intent ranking weights
+rather than the retrieval multipliers it proposed · P2 **tested and closed**
+(LightGBM lambdarank, fold B −0.0080, a tie) · P3 diagnosed but superseded (18 misses → 8) · P4 untouched ·
+P5 undecided.
 
 ## RESOLVED — modified evaluator on `origin/main`
 
@@ -606,7 +741,9 @@ Noted so they don't creep into the roadmap:
   transfers.
 - **LLM reranking.** Order-sensitive, therefore non-deterministic for a graded
   submission, and official scoring may run without network access.
-- **Refactoring for its own sake.** The competition ends before the payoff does.
+- **Refactoring for its own sake.** Out because it changes no measured outcome,
+  not because of any deadline — restructuring that demonstrably enables a
+  measurable gain is in scope like anything else.
 
 ---
 
@@ -623,6 +760,14 @@ Noted so they don't creep into the roadmap:
 - Work lands on a personal branch and merges into `main` by PR.
 - Wants the reasoning recorded, not just the result — a change without its
   measurement and its tradeoff is not finished.
+- **Do not factor timeline into recommendations.** Rank options by expected
+  impact and by what the evidence supports, never by what fits before a
+  deadline. Do not defer, shrink, or drop an option because it "takes too long",
+  and do not write "not enough time before submission", "not this week", or
+  "park it for later" — scheduling is He Jinhong's call, not yours. State what
+  an option is worth and what it costs to build, then let him decide.
+  Effort estimates are fine when asked for; using them to pre-reject an option
+  is not.
 
 ---
 
@@ -691,8 +836,9 @@ This includes your own errors — *"this entry claimed X; that was wrong, caught
 by He Jinhong"* is one of the most useful lines the file can contain.
 
 **3. Always state verification status, especially when it is bad.** *"Verified
-end-to-end against all 200 sessions"* and *"not measured — ran out of time"* are
-both useful; an entry with no status silently reads as verified. Say what you
+end-to-end against all 200 sessions"* and *"not measured — no trace available
+yet"* are both useful; an entry with no status silently reads as verified. Say
+what you
 ran, on what, and what you did not run. If a result came from a fold, a subset,
 or a single seed, say so — see "Measurement discipline".
 

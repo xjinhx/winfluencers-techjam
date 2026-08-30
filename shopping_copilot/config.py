@@ -136,6 +136,21 @@ class RankingConfig:
     w_profile_affinity: float = 0.030
     w_category_focus: float = 0.070
 
+    # Same per-intent override pattern as w_fused_*, `None` falls back to the
+    # shared default above. Both are "soft, no-constraint-needed" signals --
+    # the same rationale that justifies dropping `fused` for buying/uncertain
+    # (real stated facts are better evidence) argues these should matter MORE
+    # for browsing specifically, where no such facts exist to lean on instead.
+    # Untested until given their own knob; a blanket global raise was already
+    # shown to do effectively nothing, which is a different question from
+    # "does it help browsing specifically while leaving buying/uncertain alone".
+    w_profile_affinity_buying: float | None = None
+    w_profile_affinity_browsing: float | None = None
+    w_profile_affinity_uncertain: float | None = None
+    w_category_focus_buying: float | None = None
+    w_category_focus_browsing: float | None = None
+    w_category_focus_uncertain: float | None = None
+
     # Diversity: MMR on positions 2-10, browsing only. Position 1 is never
     # diversified -- every demotion of the true target costs MRR directly.
     enable_mmr: bool = False

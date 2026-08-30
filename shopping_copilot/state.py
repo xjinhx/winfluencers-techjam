@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass, field
 
 from .profile import ShopperProfile
-from .structured import SOFT_FIELDS, ConstraintExtractor, Constraints
+from .structured import CLEARABLE_FIELDS, ConstraintExtractor, Constraints
 from .text import bigrams, tokenize
 
 # Phrases the simulator wraps around real content. Stripped before tokenising.
@@ -77,6 +77,11 @@ _LEAD_IN_RE = re.compile(
 # Scanning that half for constraints would re-introduce the very thing the
 # customer just overrode, so it is stripped before extraction runs.
 _OVERRIDE_CUE_RE = re.compile(r"\binstead of\b|\brather than\b|\bnot\b", re.I)
+
+# Fields treated as "what kind of thing is being bought" -- only trusted as
+# the actual change when they're the ONLY thing an override identifies (see
+# their use in observe()).
+_IDENTITY_FIELDS = frozenset({"categories", "gender"})
 
 
 def _kept_text(text: str) -> str:
@@ -209,7 +214,19 @@ class ShoppingState:
             touched: set[str] = set()
             for text in kept_texts:
                 touched |= _touched_fields(self.extractor, text)
-            touched &= SOFT_FIELDS   # never gender/category -- those are kept regardless
+            touched &= CLEARABLE_FIELDS   # only ever act on recognised slot names
+
+            # categories/gender describe "what kind of thing" is being bought
+            # and the category vocabulary is large and noisy (near-synonyms
+            # like "sneakers" are their own entries alongside "shoes"), so a
+            # sentence that is really just a color/material change often also
+            # incidentally matches a category word. Only trust "category
+            # changed" when it is the ONLY thing the override identifies --
+            # otherwise the mention is almost certainly incidental, and acting
+            # on it would discard a perfectly good, more complete category
+            # anchor (e.g. "running shoes") for a narrower one.
+            if touched and not touched <= _IDENTITY_FIELDS:
+                touched -= _IDENTITY_FIELDS
 
             if touched:
                 # Surgical: only demote spans about the SAME attribute(s) the
@@ -219,6 +236,12 @@ class ShoppingState:
                         span.superseded = True
                         span.weight *= override_decay
                 self.constraints.clear_soft(only=touched)
+                if "categories" in touched:
+                    # category_phrase is re-applied to constraints on every
+                    # turn below (it also drives query() category weighting),
+                    # so leaving the OLD phrase in place would immediately
+                    # re-add the category clear_soft() just removed.
+                    self.category_phrase = " ".join(kept_texts)
             else:
                 # Couldn't tell which attribute changed (no recognisable slot
                 # in the new text) -- fall back to the old blanket reset
