@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from .catalog import Catalog, Product
 from .profile import ShopperProfile
-from .structured import SATISFIED, VIOLATED, Constraints, evaluate_all
+from .structured import SATISFIED, UNKNOWN, VIOLATED, Constraints, evaluate_all
 
 CONSTRAINT_DIMENSIONS = ("gender", "brand", "category", "price", "material", "color")
 
@@ -49,6 +49,7 @@ FEATURE_NAMES: tuple[str, ...] = (
     "has_description",
     "n_features_norm",
     *[f"{dim}_{outcome}" for dim in CONSTRAINT_DIMENSIONS for outcome in ("satisfied", "violated")],
+    *[f"{dim}_unknown" for dim in CONSTRAINT_DIMENSIONS],
     "profile_affinity",
     "category_focus",
 )
@@ -126,6 +127,8 @@ def extract(product: Product, ctx: ScoringContext) -> list[float]:
         outcome = outcomes[dimension]
         vector.append(1.0 if outcome == SATISFIED else 0.0)
         vector.append(1.0 if outcome == VIOLATED else 0.0)
+    for dimension in CONSTRAINT_DIMENSIONS:
+        vector.append(1.0 if outcomes[dimension] == UNKNOWN else 0.0)
     vector.append(ctx.profile.affinity(product.title, product.features_text))
     vector.append(category_focus)
     return vector

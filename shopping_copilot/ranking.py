@@ -26,7 +26,7 @@ from typing import Protocol
 
 from .catalog import Product
 from .config import ConstraintConfig, PriorConfig, RankingConfig
-from .features import FEATURE_INDEX, FEATURE_NAMES, ScoringContext, extract
+from .features import FEATURE_NAMES, ScoringContext, extract
 
 
 class ScoringModel(Protocol):
@@ -62,9 +62,9 @@ def build_linear_weights(
 ) -> dict[str, float]:
     """Assemble the named weight map from config.
 
-    `*_unknown` weights are applied separately in `Ranker.score_candidate`
-    because 'unknown' is the absence of both one-hot columns, not a column of
-    its own.
+    `*_unknown` weights are ordinary columns here, same as `*_satisfied` /
+    `*_violated` -- folded in so a learned model sees the penalty as a
+    feature instead of a hand-tuned constant applied outside the model.
     """
     weights: dict[str, float] = {
         "fused": ranking.w_fused,
@@ -89,6 +89,7 @@ def build_linear_weights(
     for dimension in ("gender", "brand", "category", "price", "material", "color"):
         weights[f"{dimension}_satisfied"] = getattr(constraints, f"{dimension}_satisfied")
         weights[f"{dimension}_violated"] = getattr(constraints, f"{dimension}_violated")
+        weights[f"{dimension}_unknown"] = getattr(constraints, f"{dimension}_unknown")
     return weights
 
 
@@ -120,23 +121,10 @@ class Ranker:
                 weights = build_linear_weights(ranking, priors, constraints)
                 weights["fused"] = override
                 self.intent_models[intent] = LinearModel(weights)
-        self._unknown_penalty = {
-            dimension: getattr(constraints, f"{dimension}_unknown")
-            for dimension in ("gender", "brand", "category", "price", "material", "color")
-        }
 
     def score_candidate(self, product: Product, ctx: ScoringContext) -> tuple[float, list[float]]:
         vector = extract(product, ctx)
         score = self.intent_models.get(ctx.intent, self.model).score(vector)
-        # 'unknown' is neither column set. Priced here so the feature vector
-        # stays a clean one-hot-minus-one for a future tree model.
-        for dimension, penalty in self._unknown_penalty.items():
-            if not penalty:
-                continue
-            satisfied = vector[FEATURE_INDEX[f"{dimension}_satisfied"]]
-            violated = vector[FEATURE_INDEX[f"{dimension}_violated"]]
-            if satisfied == 0.0 and violated == 0.0:
-                score += penalty
         return score, vector
 
     def rank(
