@@ -28,6 +28,10 @@ from .catalog import Product
 from .config import ConstraintConfig, PriorConfig, RankingConfig
 from .features import FEATURE_INDEX, FEATURE_NAMES, ScoringContext, extract
 
+# Feature names that may carry a different weight per routed intent, via a
+# `w_{feature}_{intent}` field on RankingConfig (see Ranker.__init__).
+INTENT_OVERRIDABLE = ("fused", "profile_affinity", "category_focus")
+
 
 class ScoringModel(Protocol):
     """Maps a feature vector to a scalar. The one seam a GBDT would replace."""
@@ -110,16 +114,25 @@ class Ranker:
         )
         # One model per routed intent, built only when the caller did not supply
         # its own scorer -- a GBDT dropped into `model` keeps full control of the
-        # vector rather than having `fused` rewritten underneath it.
+        # vector rather than having features rewritten underneath it. Any of
+        # INTENT_OVERRIDABLE may differ per intent via a `w_{feature}_{intent}`
+        # config field (None falls back to the shared default); all applicable
+        # overrides for one intent are merged into a single LinearModel for it.
         self.intent_models: dict[str, ScoringModel] = {}
         if model is None:
+            base_weights = build_linear_weights(ranking, priors, constraints)
             for intent in ("buying", "browsing", "uncertain"):
-                override = getattr(ranking, f"w_fused_{intent}", None)
-                if override is None or override == ranking.w_fused:
-                    continue
-                weights = build_linear_weights(ranking, priors, constraints)
-                weights["fused"] = override
-                self.intent_models[intent] = LinearModel(weights)
+                weights: dict[str, float] | None = None
+                for feature in INTENT_OVERRIDABLE:
+                    default = getattr(ranking, f"w_{feature}")
+                    override = getattr(ranking, f"w_{feature}_{intent}", None)
+                    if override is None or override == default:
+                        continue
+                    if weights is None:
+                        weights = dict(base_weights)
+                    weights[feature] = override
+                if weights is not None:
+                    self.intent_models[intent] = LinearModel(weights)
         self._unknown_penalty = {
             dimension: getattr(constraints, f"{dimension}_unknown")
             for dimension in ("gender", "brand", "category", "price", "material", "color")

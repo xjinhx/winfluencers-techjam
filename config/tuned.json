@@ -59,7 +59,7 @@
     "w_phrase_features": 0.13,
     "w_phrase_categories": 0.5,
     "w_coverage": 0.6,
-    "w_profile_affinity": 0.03,
+    "w_profile_affinity": 0.06,
     "w_category_focus": 0.0,
     "enable_mmr": false,
     "mmr_lambda": 0.85,
