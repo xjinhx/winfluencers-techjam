@@ -58,6 +58,22 @@ class RetrievalConfig:
     candidate_depth: int = 200
     rerank_depth: int = 200
 
+    # Conjunctive exact-substring candidate injection
+    # (PRD_conjunctive_injection.md): a product whose search_blob contains
+    # EVERY live constraint span verbatim enters the pool regardless of BM25
+    # rank. Additive only -- the full fused slice is kept and survivors are
+    # appended after it, so nothing is displaced and the reranked set grows.
+    # (A displacing "prepend" variant was measured and deleted: it converted
+    # the same miss but knocked two other targets out of the pool entirely.)
+    # Always on. The two gates below are the mechanism's selectivity, not an
+    # enable switch: below min_spans a single boilerplate span matches a
+    # fifth of the catalog (10,918 survivors for "polyester" alone), and a
+    # conjunction with more survivors than max_survivors is skipped outright
+    # that turn rather than truncated by some other order, which would
+    # reintroduce exactly the dilution that killed the category union.
+    injection_min_spans: int = 2
+    injection_max_survivors: int = 200
+
     enable_dense: bool = True
     dense_ngram: int = 4
     dense_depth: int = 150
