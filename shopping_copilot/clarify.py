@@ -134,19 +134,23 @@ class ClarificationPolicy:
         )
 
     def _confidence(self, scores: list[float]) -> float:
-        """Margin between the top candidate and the rest of the shortlist.
-
-        A wide margin means the ranking has separated something; a flat top-10
-        means it has not, and a question is worth more than another guess.
+        """NQC (Normalized Query Commitment; Shtok et al. 2009): how much the
+        ranker has "committed" to separating good candidates from bad ones,
+        with no ground truth available -- standard deviation of the top-10
+        scores, normalised by the top score. High spread means the ranker
+        clearly pulled some candidates ahead of others (trustworthy); scores
+        bunched close together means it didn't (worth a question).
         """
         if len(scores) < 2:
             return 1.0
         top = scores[0]
         if top <= 0:
             return 0.0
-        following = scores[1:10]
-        mean_rest = sum(following) / len(following)
-        return max(0.0, min(1.0, (top - mean_rest) / abs(top)))
+        window = scores[:10]
+        mean = sum(window) / len(window)
+        variance = sum((s - mean) ** 2 for s in window) / len(window)
+        std = variance ** 0.5
+        return max(0.0, min(1.0, std / abs(top)))
 
     def _best_attribute(self, state, candidates: list[Product]) -> tuple[str | None, float]:
         """Expected information gain = P(answered) x (uncertainty it removes).
