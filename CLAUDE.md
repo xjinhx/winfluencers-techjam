@@ -118,11 +118,12 @@ Don't re-litigate 1000 vs. 800 based on this tiny gap.
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
-- **0.862111, 0.863556, and 0.876336** (and the miss lists that went with
-  them) all predate the final `per_field_depth=800` reconciliation below.
+- **0.862111, 0.863556, 0.876336, and 0.876342** (and the miss lists that went
+  with them) all predate the `constraint_commonness_penalty` fix below.
   0.862111 is pre-merge-with-main; 0.863556 is post-merge-pre-fix;
   0.876336 was Dylan's own `per_field_depth=1000` before reconciling with
-  Joey's `800` already on `main`.
+  Joey's `800` already on `main`; 0.876342 is the reconciled `800` value,
+  current on `main` but superseded on this branch.
 - `results.json` = **0.847625** (run 2026-08-30 01:03, eight hours before
   `config/tuned.json` was last edited) and `results_tuned.json` = **0.784838**.
   Both predate the current config. `README.md` still headlines 0.8476.

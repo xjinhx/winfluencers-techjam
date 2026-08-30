@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .profile import ShopperProfile
 from .structured import CLEARABLE_FIELDS, ConstraintExtractor, Constraints
@@ -266,13 +267,28 @@ class ShoppingState:
             self.asked_attributes.append(attribute)
 
     # -- query construction ----------------------------------------------
-    def query(self, *, recency_bonus: float = 0.15) -> dict[str, list[tuple[str, float]]]:
+    def query(
+        self,
+        *,
+        recency_bonus: float = 0.15,
+        term_commonness: Callable[[str], float] | None = None,
+        commonness_penalty_strength: float = 0.0,
+        max_df_ratio: float = 0.35,
+    ) -> dict[str, list[tuple[str, float]]]:
         """Per-field weighted term lists.
 
         Field routing is the point. The category phrase is the customer naming
         a taxonomy node, so it belongs against `categories` and `title`, not
         against 400 words of marketing copy. Constraint spans are quoted product
         copy, so they belong against `features` and `title`.
+
+        `term_commonness`/`commonness_penalty_strength` soft-damp constraint
+        terms that are near-universal catalog boilerplate (e.g. "manmade
+        sole", "platform measures approximately") -- disclosed verbatim from
+        the target's own listing, they otherwise earn full query weight and
+        can pull in thousands of unrelated competing documents. Never applied
+        to `category_terms`: the category phrase must keep full routing
+        weight regardless of how common its words are.
         """
         category_terms = [
             term for term in tokenize(self.category_phrase)
@@ -286,7 +302,15 @@ class ShoppingState:
             for term in tokenize(span.text):
                 if term in BOILERPLATE_TERMS:
                     continue
-                constraint_terms[term] = max(constraint_terms.get(term, 0.0), weight)
+                term_weight = weight
+                if term_commonness is not None and commonness_penalty_strength > 0:
+                    df_ratio = term_commonness(term)
+                    raw_damping = (
+                        max(0.0, 1.0 - df_ratio / max_df_ratio) if max_df_ratio > 0 else 1.0
+                    )
+                    damping = 1.0 - commonness_penalty_strength * (1.0 - raw_damping)
+                    term_weight *= damping
+                constraint_terms[term] = max(constraint_terms.get(term, 0.0), term_weight)
 
         category_weighted = [(term, 1.0) for term in dict.fromkeys(category_terms)]
         constraint_weighted = sorted(

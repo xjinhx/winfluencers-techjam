@@ -126,7 +126,12 @@ class Agent:
         state.observe(user_message, turn, override_decay=self.config.dialogue.override_decay)
         decision = route(state, self.config.dialogue)
 
-        queries = state.query(recency_bonus=self.config.dialogue.recency_bonus)
+        queries = state.query(
+            recency_bonus=self.config.dialogue.recency_bonus,
+            term_commonness=self.lexical.commonness,
+            commonness_penalty_strength=retrieval.constraint_commonness_penalty,
+            max_df_ratio=retrieval.max_df_ratio,
+        )
         lexical_mixture, per_field = self.lexical.search(queries, retrieval.per_field_depth)
 
         # The dense route reads the surface text, not the term list: character

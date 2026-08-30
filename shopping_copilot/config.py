@@ -39,6 +39,16 @@ class RetrievalConfig:
     max_df_ratio: float = 0.35
     max_query_terms: int = 48
 
+    # Soft down-weighting of constraint-span query terms by catalog
+    # commonness (state.py's query()), separate from BM25Field's own hard
+    # max_df_ratio cutoff above. Ramps weight down continuously as a term's
+    # document-frequency ratio approaches max_df_ratio, rather than
+    # all-or-nothing at the cutoff -- a few medium-frequency boilerplate
+    # terms (e.g. "manmade sole") compounding together currently each earn
+    # full query weight right up to that point. 0.0 = disabled (default,
+    # preserves prior behaviour exactly).
+    constraint_commonness_penalty: float = 0.0
+
     # Convex combination, not RRF (Bruch et al. 2210.11934). One parameter,
     # tunable on 200 sessions.
     fusion_alpha: float = 0.78  # weight on lexical; (1 - alpha) on dense

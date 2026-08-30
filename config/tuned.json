@@ -13,6 +13,7 @@
     "w_store": 0.35,
     "max_df_ratio": 0.35,
     "max_query_terms": 48,
+    "constraint_commonness_penalty": 0.3,
     "fusion_alpha": 0.78,
     "per_field_depth": 800,
     "candidate_depth": 200,
