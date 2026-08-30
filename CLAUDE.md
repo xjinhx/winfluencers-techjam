@@ -84,38 +84,75 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.892242`** — measured 2026-08-30 by running the
-adopted title/coverage interaction config through the unmodified evaluator on
-all 200 public sessions. Up from 0.881716 — see "What was found" below.
+**Live score: `TechnicalScore = 0.903604`** — measured 2026-08-31 on `d2f12ac`
+by running the committed `config/tuned.json` (now `per_field_depth: 1000`)
+through the unmodified evaluator on all 200 public sessions. Up from
+**0.900004** — see "What was found" for the `per_field_depth` 800→1000 entry.
+Reproduced across the CLI evaluator, `tools.evalkit.Bench`, and offline replay;
+all three agree exactly.
 
-**On 800 vs. 1000 (`per_field_depth`):** this was independently found twice —
-Dylan tested and adopted `1000` (0.876336) before discovering He/Joey had
-independently pushed `800` (0.876342) to `main` in the meantime. Reconciled by
-keeping `800` (per Dylan's explicit choice, and it's already what `main` has)
-— the two scores are statistically indistinguishable (+0.000006 apart, nowhere
-near the ~0.05 MRR-scale noise floor), so this was a coordination call, not a
-quality one. Don't re-litigate 1000 vs. 800 based on this tiny gap.
+**0.900004 is one step further back, not the live number — read it as "trunk
+before this session's depth change."** It is the merged-trunk figure this same
+file already flagged as a correction to two stale parallel-branch numbers
+(`span_all` 0.888187, title/coverage 0.892242) — that correction stands, and
+this entry sits on top of it, not in tension with it.
+
+**On 800 vs. 1000 (`per_field_depth`) — reopened and resolved 2026-08-31,
+superseding the paragraph below.** The 2026-08-30 reconciliation kept `800`
+because the two values were statistically indistinguishable *at that config* —
+true at the time, but `span_all` (landed the same day) changed what depth
+buys: it gave the ranker a feature that can actually use a target once depth
+makes it visible, which the 39-rank-39 trace behind the old "structurally
+unwinnable" verdict on `public_0092` never had. Re-tested with a pool-recall
+measurement across the full depth grid (200 sessions, every `per_field_depth`
+value 200 through 50,000 × every `candidate_depth` up to 800): retrieval
+recall **saturates completely between 600 and 800** — 800→50,000 buys **0.0
+percentage points**, so this is not "1000 is a little better," it is "800 was
+already at the knee and 1000 is the next reachable point that has HR@10
+headroom." Validated with `stratified_halves(seed=7)`: fold A **−0.0029**,
+fold B **+0.0101** — held-out beats fitted, the signature this file already
+trusts from `span_all`. `candidate_depth` widening was tested as the
+alternative fix and rejected (see the new "What was found" entry) — it
+converts the same misses but costs MRR through dilution and loses to depth on
+fold B. **The 2026-08-30 "don't re-litigate" note was correct for the config
+it was written against; it does not survive `span_all` shipping, and this is
+the re-measurement that note itself called for should new evidence appear.**
 
 | metric | value |
 |---|---|
-| HR@10 | 0.990 (2 misses, down from 3) |
-| MRR | 0.722139 |
-| MTTC | 1.97 |
-| Efficiency | 0.903 |
-| **TechnicalScore** | **0.892242** |
+| HR@10 | 0.995 (1 miss: `public_0137`) |
+| MRR | 0.748345 |
+| MTTC | 1.92 |
+| Efficiency | 0.908 |
+| **TechnicalScore** | **0.903604** |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7721 | 1.31 |
-| browsing | 80 | 0.9750 | 0.6397 | 1.96 |
-| intent_override | 30 | 1.0000 | 0.8261 | 3.70 |
-| boundary | 10 | 1.0000 | 0.6700 | 2.10 |
+| buying | 80 | 1.0000 | 0.7945 | 1.3125 |
+| browsing | 80 | 0.9875 | 0.6708 | 1.85 |
+| intent_override | 30 | 1.0000 | 0.8833 | 3.70 |
+| boundary | 10 | 1.0000 | 0.5950 | 2.00 |
+
+Rank distribution of the 199 hits (recomputed via `tools.offline_eval`'s own
+`ReplayScorer`, cross-checked against the CLI evaluator's aggregate HR@10/MRR —
+exact match): **124 at rank 1**, 31 at rank 2, 34 at ranks 3-5, 10 at ranks
+6-10. The rank-2 bucket is still the largest single block below the top —
+unchanged by this fix, since depth only affects sessions that weren't in the
+pool at all.
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
 `w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
+- **0.900004** was the merged-trunk figure *before* this session's
+  `per_field_depth` 800→1000 change. It is a correct, honest measurement of
+  `d2f12ac` at that config — kept as the reference point the depth change is
+  measured against, not an error — but it is not the live score. Superseded
+  2026-08-31 by 0.903604.
+- **0.888187 and 0.892242** are each *one* of the two parallel branches, not the
+  trunk. Both are honest measurements; neither describes `d2f12ac`. Superseded
+  2026-08-31 by 0.900004, itself now superseded by 0.903604.
 - **0.881716** predates the title/coverage interaction adopted below.
 - **0.862111, 0.863556, 0.876336, and 0.876342** (and the miss lists that went
   with them) all predate the `constraint_commonness_penalty` fix below.
@@ -123,9 +160,11 @@ is no longer an open decision, and any doc saying otherwise is stale.
   0.876336 was Dylan's own `per_field_depth=1000` before reconciling with
   Joey's `800` already on `main`; 0.876342 is the reconciled `800` value,
   current on `main` but superseded on this branch.
-- `results.json` = **0.881716** and predates the current config. It was preserved
-  rather than overwritten per Critical rule 1; the validated current output is
-  `scratch/title_experiments/integrated_live.json`.
+- `results.json` = **0.895185** (checked 2026-08-31; the entry below said
+  0.881716, which was already out of date). It predates the current config and
+  was preserved rather than overwritten per Critical rule 1. It is *not* a
+  trunk measurement of anything — it was written 19:30 on 2026-08-30, before
+  `ab4e55c` landed at 22:20. `results_tuned.json` = **0.784838**, older still.
 - `docs/pending.md` was written at the 0.7848 stage. Its P-item numbering is
   still useful, its measurements are not — see "Roadmap".
 
@@ -243,7 +282,7 @@ python -m tools.why_lost --trace c:\tmp\features.jsonl --ranks 3,4,5 --top 30
 python -m tools.tune --output c:\tmp\cfg.json --report c:\tmp\tuning_report.json
 
 # tests
-python -m unittest discover -s tests    # 32 tests
+python -m unittest discover -s tests    # 38 tests (35 copilot + 3 evaluator)
 ```
 
 **Tracing:** set `trace_path` in the config to emit `features.jsonl` (~115k
@@ -258,6 +297,199 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**ADOPTED: `per_field_depth` 800 → 1000, reopening a decision this file said
+not to re-litigate. 0.900004 → 0.903604 (2026-08-31).**
+
+**`public_0092`'s "structurally unwinnable" verdict was wrong — it was a
+retrieval failure, not a ranking one.** That verdict (see the entry lower in
+this file) traced the target with its candidacy *force-injected*, and never
+checked whether the target reaches the ranker unassisted. It doesn't. Turn-by-
+turn tracing of the live 200-candidate pool shows the target's fused rank
+getting **worse** as constraints are disclosed (267 → 634 → 1213 across turns
+1-3) and its per-field BM25 rank on `features` — the one field holding all
+four disclosed constraints — sitting at **831, thirty-one places past the
+800-deep cutoff**, at every turn. It is never visible to `span_all` or to
+anything else in the feature vector, because it is never in the candidate set.
+
+**Why rank 831 for a listing whose features contain every disclosed string.**
+BM25 length normalisation. The target's `features` field is 171 tokens — five
+marketing blocks (❤ SIZE / DESIGN / LAUNDRY / GIFT / SERVE) — 2.6× the catalog
+average and longer than 94% of the catalog on this field. At `b_features =
+0.75` its score is cut to **46%** of what identical term matches would earn on
+an average-length listing. It is punished for verbosity on the one field where
+it holds the customer's entire disclosed intent.
+
+**Why `per_field_depth` was reconciled to 800 just one day before this, and
+why that call was right at the time.** The 2026-08-30 reconciliation entry
+(below) measured 800 vs. 1000 as **+0.000006** — indistinguishable — and that
+was true *for the config being tested*. `span_all` (same day, later commit)
+changed the payoff of depth without anyone re-measuring the interaction: it
+gave the ranker a feature that separates "matches all N disclosed constraints"
+from "matches some," which is exactly what a target needs once depth makes it
+visible. Before `span_all`, raising depth to 1000 put this same target in the
+pool at **rank 39** and left it there — visible, but with nothing in the
+vector able to lift it. `span_all` is that missing lever. **The two changes
+interact; neither one's isolated measurement predicts the pair.**
+
+**Measured properly this time, not by inspecting one session.** Built a
+pool-recall harness: for all 200 sessions, one uncapped BM25 pass per turn,
+then the real `top_n`/`convex_combine` fusion re-run at every
+`per_field_depth` × `candidate_depth` combination by truncating exactly the
+way `BM25Field.search`'s `limit` does (sorted `(-score, doc_id)`, then slice —
+confirmed against the source). Cross-checked against the live agent's actual
+candidate set at the live config: **0 mismatches across all 200 sessions**, so
+the simulation is trustworthy.
+
+```
+TARGET RECALL INTO THE CANDIDATE POOL  (rows: per_field_depth, cols: candidate_depth)
+    depth |    C=50   C=100   C=200   C=400   C=800
+      200 |   90.5%   93.5%   97.0%   98.5%   99.5%
+      800 |   92.0%   96.5%   99.0%  100.0%  100.0%   <- live (pre-change)
+     1000 |   91.5%   96.0%   99.5%  100.0%  100.0%
+     2000 |   91.0%   96.5%   98.5%  100.0%  100.0%
+    50000 |   90.5%   95.5%   99.0%   99.5%  100.0%
+```
+
+**Recall saturates completely between 600 and 800 — 800 → 50,000 is a 62×
+increase for 0.0 percentage points.** `per_field_depth` was never an
+open-ended dial; 800 sat almost exactly at the knee. The only real headroom
+left on the row axis was 800 → ~1000, which the grid shows recovering the last
+two sessions (`public_0092`, `public_0137`) at `candidate_depth ≈ 300`. Do not
+read this as "raise depth further next time" — the curve is flat past 1000 in
+every column tested, up to 50,000.
+
+**`candidate_depth` widening was the alternative fix, and it was tested and
+rejected.** Holding `per_field_depth=800`, `candidate_depth` 200→300 (with
+`rerank_depth` moved to 300 in lockstep — see the trap below) reaches 100%
+pool recall and converts both remaining misses, but on `stratified_halves`:
+
+```
+                         foldA       foldB       full     HR@10    MRR      MTTC
+incumbent (C=200)      0.887970   0.902400   0.895185   0.9900  0.730950  1.955
+C=300 R=300            0.892607   0.893208   0.892908   0.9950  0.709692  1.875
+per_field_depth=1000   0.884936   0.910950   0.897943   0.9950  0.729476  1.920
+1000 + C=300 R=300     0.886761   0.905725   0.896243   1.0000  0.710476  1.845
+```
+
+(Measured pre-merge, on `e1d3054`, before Joey's title/coverage weights — the
+pattern reproduced on `d2f12ac`, see below.) `candidate_depth=300` alone
+**loses fold B** (−0.0092): the wider pool dilutes MRR on sessions already
+winning at rank 1 by the same mechanism the category-union experiment
+recorded — more candidates surfaced by raw score, not by relevance, crowd out
+correct answers elsewhere even as they fix the targeted misses. `depth=1000`
+alone **wins fold B** (+0.0086) with HR@10 and MRR both flat-to-positive.
+Combining both **underperforms depth alone** on fold B (+0.0033 vs. +0.0086) —
+the dilution cost is still there, just partly masked by HR@10 hitting 1.0000.
+**`per_field_depth` only adds documents that genuinely match; `candidate_depth`
+adds whatever ranks next by raw score. That is the entire reason one
+generalises and the other doesn't**, and it is the same distinction this file
+already draws for `per_field_depth` vs. the category-union candidate
+injection.
+
+**A coupling trap, caught before it cost anything.** `rerank_depth` is applied
+*after* `candidate_depth` (`agent.py:174`, `candidate_ids[:rerank_depth]`) and
+both default to 200 — so raising `candidate_depth` alone without also raising
+`rerank_depth` is a silent no-op, verified directly: `C=300, R=200` scored
+byte-identical to the incumbent on fold B (0.902400 vs. 0.902400). Anyone
+testing `candidate_depth` in isolation without knowing this would conclude the
+lever does nothing. It isn't dead code — the slice executes every turn — but
+at the current values it never binds unless both move together.
+
+**Re-verified on `d2f12ac`, after this file's own trunk-remeasurement
+correction (above), because the tree changed under the original measurement.**
+Ranking weights added on trunk (`w_bm25_title_buying`, `w_title_low_coverage`,
+`w_popularity_low_coverage` — see the title/coverage entry below) specifically
+penalise low-coverage candidates riding popularity or title match, which is
+the exact dilution mechanism that made `candidate_depth` widening fail. Worth
+testing whether that changes the verdict: it doesn't reverse it, but it
+narrows the gap —
+
+```
+                         foldA       foldB       full     HR@10    MRR      MTTC
+incumbent (live, d800) 0.893608   0.906400   0.900004   0.9900  0.747014  1.955
+depth1000 C200 R200    0.890757   0.916450   0.903604   0.9950  0.748345  1.920
+depth1000 C300 R300    0.892582   0.911225   0.901904   1.0000  0.729345  1.845
+```
+
+`per_field_depth=1000` alone: fold A **−0.0029**, fold B **+0.0101**, full
+**+0.0036** — held-out beats fitted, the signature this file already trusts
+from `span_all`. `+C300 R300`: still HR@10 1.0000, but fold B **drops** to
++0.0048 and MRR falls 0.748→0.729 — Joey's penalties reduced the dilution
+cost, not eliminated it. **`per_field_depth` alone is the adopted change;
+`candidate_depth` stays at 200.**
+
+**Adopted and validated end-to-end.** `config/tuned.json`:
+`per_field_depth: 800 → 1000`. Full 200-session evaluator: **0.900004 →
+0.903604**. HR@10 0.990→0.995 (2 misses → 1: only `public_0137` remains —
+diagnosis below is unaffected by this change and still open). MRR
+0.747014→0.748345, MTTC 1.955→1.920. `public_0092` now hits at **turn 3, rank
+1** on this config (Joey's low-coverage penalties lift it past rank 2, which
+is what depth alone produced on `e1d3054`). 38/38 tests pass.
+`tools.offline_eval` against a fresh trace: **200 agree, 0 disagree** on
+`best_rank`, `target_never_in_pool` 1 (down from — see caveat below on what
+that "1" was pre-fix). `results.json` untouched throughout; every run went to
+a scratch path per Critical rule 1.
+
+**Still unverified by this set's own noise floor** (full-set +0.0036 is well
+under single-run SE ≈0.029), but carries the fold-B-beats-fold-A signature
+this file treats as trustworthy rather than the reverse. Report it as such,
+not as proven.
+
+**What this leaves open.** `public_0137` is untouched by this change — its
+fused rank gets **worse** with more depth (263 → 279 → 344 → 419 → 464 as
+`per_field_depth` rises from 800 to 50,000), the opposite mechanism from
+`public_0092`, and needs its own turn-by-turn trace rather than assuming the
+same fix applies. The rank-2 bucket (31 sessions in the new distribution) is
+unchanged by this fix, by construction — depth only affects sessions that
+weren't retrieved at all, not sessions already retrieved and merely
+mis-ordered. `candidate_depth` remains closed as a lever pending a feature
+that fixes what's actually diluting it, not a wider net.
+
+**Trunk measures 0.900004, and the two branch numbers that disagreed with it
+were both right (2026-08-31).** Re-ran the unmodified evaluator against
+`d2f12ac` because no document held a number for the *merged* trunk — the same
+failure mode the 2026-08-30 state audit found, recurring inside a day.
+
+**Result: 0.900004** — HR@10 0.990, MRR 0.747014, MTTC 1.955, Efficiency 0.9045.
+Reproduced twice on a clean tree, byte-identical. Misses are down to two,
+`public_0092` and `public_0137`; `public_0100` and `public_0161` are both
+recovered. Every scenario is at or above its previous value.
+
+**Why the docs disagreed, and why neither was wrong.** `span_all` and the
+title/coverage interaction were developed **in parallel off different parents**,
+so each was measured against a baseline that lacked the other:
+
+```
+36652f1  commonness penalty adopted                       0.876342
+ ├─ e1d3054  + span_all           (PR #8)                 0.888187   (+0.011845)
+ └─ ab4e55c  + title/coverage     (PR #9, off 36652f1)    0.892242   (+0.015900)
+d2f12ac  merge of both                                    0.900004   (+0.023662)
+```
+
+`ab4e55c`'s parent is `36652f1`, **not** `e1d3054` — confirmed with
+`git merge-base --is-ancestor`. So 0.888187 and 0.892242 are each an honest
+measurement of one change alone, and neither describes the trunk. Both are now
+listed under "Stale artefacts" for that reason, not because either was an error.
+
+**The two changes are sub-additive: +0.0237 combined against +0.0277 summed, so
+about 85% of the individual gains survive composition.** That is the expected
+direction — both reduce text-evidence confidence that disclosed constraints do
+not support, so they partly address the same failure — but the overlap is small
+enough to be worth recording. **Do not assume parallel gains add.** Two branches
+that each look like +0.015 can land anywhere between +0.015 and +0.030 together.
+Re-measure the merge, always.
+
+**Operational lesson, recorded because it cost real confusion this session:** a
+branch checkout silently changes `FEATURE_NAMES`, `config/tuned.json` and the
+test count underneath any analysis in flight, with no error and no warning.
+Mid-session, `maximising-101` was 38 features and 36 tests while `main` was 40
+and 38, and the same command produced different answers twenty minutes apart.
+**Record the commit next to every number you report**, and run
+`git log HEAD..main` before concluding that anything regressed.
+
+Verified: 38/38 tests pass. `results.json` was not overwritten — both runs went
+to scratch paths per Critical rule 1.
 
 **Title/coverage interaction adopted (2026-08-30, per He Jinhong: "try others,
 can merge a few together"):**
