@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 
 from .catalog import Catalog
-from .clarify import ClarificationPolicy
+from .clarify import ClarificationPolicy, nqc
 from .config import Config, DEFAULT_CONFIG
 from .dense import build_dense_route
 from .features import ScoringContext
@@ -248,6 +248,21 @@ class Agent:
             if (clarification.attribute is None or self.config.dialogue.recommend_on_ask_turns)
             else []
         )
+
+        # Recommendation gate. The evaluator breaks on first hit, so the rank
+        # we are scored on is fixed at the moment we know least: turn 1 is
+        # close to information-free by construction (a browsing opener
+        # discloses zero spans, and the category names hundreds of
+        # near-identical listings). Hold until the ranker has actually
+        # committed -- NQC over the ordered pool -- or until the fallback
+        # turn, whichever comes first. Composes with `recommend_on_ask_turns`
+        # as an AND: either may suppress.
+        dialogue = self.config.dialogue
+        if recommendations and dialogue.min_recommend_confidence > 0.0:
+            if (turn < dialogue.recommend_turn_fallback
+                    and nqc([s for _, s in ranked]) < dialogue.min_recommend_confidence):
+                recommendations = []
+
         return {
             "message": clarification.message,
             "ask_attribute": clarification.attribute,

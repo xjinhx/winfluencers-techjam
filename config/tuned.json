@@ -95,7 +95,9 @@
       "category": 0.0
     },
     "attribute_prior_floor": 0.05,
-    "repeat_ask_decay": 0.45
+    "repeat_ask_decay": 0.45,
+    "min_recommend_confidence": 0.054,
+    "recommend_turn_fallback": 3
   },
   "trace_path": null,
   "cache_dir": ".cache"

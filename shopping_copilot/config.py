@@ -231,6 +231,27 @@ class DialogueConfig:
     # chance at a hit that MTTC would have rewarded.
     recommend_on_ask_turns: bool = True
 
+    # Recommendation gate -- SEPARATE from the EAR ask gate above, and on a
+    # DIFFERENT SCALE. `ask_max_confidence` (0.82) sits above the entire
+    # observed NQC range [0.011, 0.194], which is why CLAUDE.md records that
+    # gate as never once flipping a decision on the public 200: it is not
+    # broken, it is unreachable. This threshold is the same statistic
+    # calibrated to the range the system actually produces -- do not tune the
+    # two together or reason from one to the other.
+    #
+    # Why hold at all: the evaluator breaks on first hit
+    # (`local_evaluator.py:252`), so an early recommendation permanently locks
+    # in whatever rank it has, and 60% of sub-rank-1 sessions lock in at turn
+    # 1 -- before the customer has disclosed the spans that separate the
+    # target from its imposter. One more turn improves 68% of the sessions
+    # that are losing and changes 98% of the ones already won.
+    #
+    # 0.0 disables the gate entirely (byte-identical to prior behaviour),
+    # which is why this is a threshold rather than a boolean -- rollback is
+    # one config value, not a code-path removal.
+    min_recommend_confidence: float = 0.0
+    recommend_turn_fallback: int = 3
+
     # Expected disclosure per attribute -- *measured*, not guessed. Produced by
     # `python -m tools.measure_attribute_yield` over the 200 public sessions:
     # normalised mean characters of new product text a question elicits.

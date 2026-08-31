@@ -84,21 +84,20 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.909328`, HR@10 = 1.000 — every public
-session hits.** This is `0.908578` (below) plus the synthetic span
-normalisation fix (+0.00075, see "What was found"); this line was not
-updated when that entry landed and is corrected here rather than left
-contradicting it. Reconfirmed 2026-08-31 on `eba9e70` after the gender
-hierarchy fix and the (disabled-by-default) brand false-positive gate,
-both byte-identical on the public set by design — see the top "What was
-found" entry. `config/tuned.json` now carries `brand_max_text_commonness:
-0.01`; every other value unchanged. Gates: `tools.evalkit.Bench` reproduces
-it exactly; `tools.offline_eval` against a fresh trace agrees on **200/200**
-session `best_rank`s; `target_never_in_pool` **1 → 0**; 51/51 tests pass
-(49 + 2 added for the gender fix).
+**Live score: `TechnicalScore = 0.936614`, HR@10 = 1.000 — every public
+session hits.** This is `0.909328` (below) plus the confidence-gated
+recommendation hold (+0.027286, see the top "What was found" entry).
+`config/tuned.json` now carries `min_recommend_confidence: 0.054` and
+`recommend_turn_fallback: 3`; every other value unchanged. Gates: the
+unmodified CLI evaluator reproduces it exactly; `tools.offline_eval`
+against a fresh 95,665-row trace agrees on **200/200** session
+`best_rank`s; `target_never_in_pool` **0**; 56/56 tests pass (51 + 5 added
+for the gate). Default-off (`min_recommend_confidence: 0.0`) re-measures
+**0.909328 byte-identically**, which is the rollback path.
 
-Prior figures, kept for the chain: up from **0.908578** (the conjunctive
-injection, `46a6294` plus the injection change) from **0.903753** (this
+Prior figures, kept for the chain: up from **0.909328** (synthetic span
+normalisation on top of the injection) from **0.908578** (the conjunctive
+injection, `46a6294` plus the injection change) from **0.903753** (that
 tree with the old code) / **0.903604** (`d2f12ac`, the last
 committed-trunk measurement).
 
@@ -135,35 +134,48 @@ fold B. **The 2026-08-30 "don't re-litigate" note was correct for the config
 it was written against; it does not survive `span_all` shipping, and this is
 the re-measurement that note itself called for should new evidence appear.**
 
-| metric | value |
-|---|---|
-| HR@10 | **1.000** (0 misses) |
-| MRR | 0.753595 |
-| MTTC | 1.875 |
-| Efficiency | 0.9125 |
-| **TechnicalScore** | **0.908578** |
+| metric | value | (was, pre-gate) |
+|---|---|---|
+| HR@10 | **1.000** (0 misses) | 1.000 |
+| MRR | 0.876048 | 0.756095 |
+| MTTC | 2.310 | 1.875 |
+| Efficiency | 0.869 | 0.9125 |
+| **TechnicalScore** | **0.936614** | 0.909328 |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7961 | 1.3125 |
-| browsing | 80 | 1.0000 | 0.6833 | 1.7375 |
+| buying | 80 | 1.0000 | 0.9056 | 1.825 |
+| browsing | 80 | 1.0000 | 0.8549 | 2.2375 |
 | intent_override | 30 | 1.0000 | 0.8806 | 3.70 |
-| boundary | 10 | 1.0000 | 0.5950 | 2.00 |
+| boundary | 10 | 1.0000 | 0.7950 | 2.60 |
 
-Rank distribution of the 200 hits (from the gated `out_injection` run's
-per-session `best_rank`, cross-checked against the CLI aggregate — exact
-match): **125 at rank 1**, 31 at rank 2, 35 at ranks 3-5, 9 at ranks 6-10.
-With HR@10 saturated, **all remaining headroom is MRR (75 sessions below
-rank 1, up to +0.0739) and efficiency (up to +0.0175, floored by
-intent_override's structural inability to hit before turn 3-4)**. The rank-2
-bucket remains the largest single block below the top and remains gated on
-new feature information, not reweighting — see "Remaining headroom".
+**`intent_override` is byte-identical across the change** (MRR and MTTC both
+unmoved to four decimals) and that is a correctness check, not a
+coincidence: those sessions cannot register a hit before their override turn
+(3 or 4), which is at or past `recommend_turn_fallback = 3`, so the gate can
+never bind for them. If a future threshold change moves this row, the gate
+is firing somewhere it should not.
+
+**Rank distribution, superseded by the gate — recompute before quoting.**
+The pre-gate distribution was 125 rank 1 / 31 rank 2 / 35 ranks 3-5 / 9
+ranks 6-10. The gate moved **39 sessions up and 1 down, losing none**, so
+those counts no longer describe the live build; the gated run's
+per-session `best_rank`s are in `c:/tmp/out_conf_gate.json` (scratch,
+regenerable) rather than restated here, because this file has twice carried
+a distribution that a later change silently invalidated. With HR@10
+saturated at 1.000, remaining headroom is still MRR plus efficiency, but
+efficiency is now the *spent* term rather than the free one — see the gate
+entry in "What was found" for the ceiling this leaves.
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
 `w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
+- **0.909328** is the pre-gate figure — honest, and still the number the
+  build produces with `min_recommend_confidence: 0.0`, which is why it is
+  the documented rollback target rather than simply an old number.
+  Superseded 2026-08-31 by 0.936614.
 - **0.903604 and 0.903753** are the pre-injection figures — `d2f12ac` and the
   `46a6294` working tree respectively, both honest, both superseded
   2026-08-31 by 0.908578 when the conjunctive injection became always-on.
@@ -319,6 +331,124 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**ADOPTED: confidence-gated recommendation hold. 0.909328 → 0.936614,
+fold B +0.0259 (2026-08-31, per arwenalyssa: "can u do build the features
+based on prd confidence gated recommend", then "adopt, don't commit" at
+τ=0.054).** Built from `docs/PRD_confidence_gated_recommend.md`, which this
+session did not author — read the PRD for the full evidence base; this entry
+records what building it actually confirmed.
+
+**The mechanism, in one line:** hold the recommendation list until the ranker
+has committed (NQC over the ranked pool) or until turn 3, whichever comes
+first, instead of recommending on every turn. Two `DialogueConfig` fields, one
+gate in `agent.py`, no new feature, no new retrieval, no new dependency.
+
+**Why holding pays.** `local_evaluator.py:252` breaks on first hit, so the
+rank we are scored on is fixed at the moment we know least — and turn 1 is
+near information-free *by evaluator construction*, not as a property of these
+200 sessions: a browsing opener discloses zero spans and the category name
+covers hundreds of near-identical listings. 60% of sub-rank-1 sessions locked
+in at turn 1. One more turn improves **68%** of the sessions that are losing
+and changes **98%** of the ones already won — that asymmetry is the whole fix.
+
+**Measured, unmodified CLI evaluator, both runs to scratch paths:**
+
+| | full 200 | HR@10 | MRR | MTTC | fold A | fold B |
+|---|---|---|---|---|---|---|
+| default-off (τ=0.0) | 0.909328 | 1.0000 | 0.756095 | 1.875 | 0.902707 | 0.915950 |
+| **τ=0.054, fb=3** | **0.936614** | **1.0000** | 0.876048 | 2.310 | +0.028671 | **+0.025900** |
+
+**39 sessions improved, 1 worsened, 0 lost.** Every published PRD number
+reproduced to six decimals — full set, both folds, MRR and MTTC — which is
+worth recording on its own: the PRD's replay harness is trustworthy for
+recommend-timing policies, as it claimed.
+
+**Why τ=0.054 and not τ=0.085, which scores higher (0.941314) on the public
+200.** Fold B is *tied* (+0.0259 vs +0.0260), so the extra full-set gain lives
+almost entirely in fold A — i.e. in the half that was fitted. τ=0.054 also
+costs 0.4 fewer turns of MTTC and keeps HR@10 at 1.0000. The sweep is a broad
+plateau (fold B flat at +0.021 to +0.026 across τ ∈ [0.052, 0.090]), the same
+non-overfitting signature this file already trusts from `per_field_depth` and
+`constraint_commonness_penalty` — so this is a shape choice on a plateau, not
+a peak that was hunted for. **The low edge was chosen because the failure
+modes are asymmetric: under-holding decays gracefully toward the live
+baseline, over-holding falls off a cliff (fold B decays past τ=0.09, and both
+`hold-4` and τ=0.15 go net negative).**
+
+**The PRD's §6.4 warning was correct, and it is load-bearing rather than
+defensive — verified by deliberately running it both ways.** `agent.py` writes
+the trace *before* the recommendation decision, so a withheld turn still emits
+its full feature rows, and `tools/offline_eval.py` had no notion of a withheld
+turn. Replaying the gated trace with the gate off: **160 agree, 40 disagree** —
+exactly the 39 improved + 1 worsened sessions, i.e. it fails on precisely the
+sessions the gate exists to help. With the patch: **200/200 agree**, MRR
+0.876048 matching live exactly. Anyone who had skipped that patch would have
+seen a loud validation failure and could plausibly have "fixed" it by
+weakening the gate rather than the tool.
+
+**`nqc` has exactly one definition** (`clarify.py`, module level), delegated to
+by both `ClarificationPolicy._confidence` and the new gate, and imported by
+`tools/offline_eval.py`. This is deliberate and is the second-order lesson from
+the `ReplayScorer` unknown-penalty bug already recorded below: a replay tool
+that reimplements a formula silently drifts from it.
+
+**Note the ask gate and the recommend gate share a statistic and nothing
+else.** `ask_max_confidence = 0.82` sits above the entire observed NQC range
+[0.011, 0.194], which is why this file records NQC as "a no-op that never once
+flips a gate decision" — **that gate is not broken, it is unreachable.** The
+new threshold is the same statistic calibrated to the range the system
+actually produces. Do not tune the two together or reason from one to the
+other.
+
+**Two things measured while building that the PRD left open:**
+
+1. **`_empty_response` fires 0 times in 200 sessions** (462 evaluator turns,
+   462 turns emitting trace rows — exact). PRD §4.4 flagged it ungated with
+   "nobody has measured how often this path fires"; on the public set it is
+   dead code, so leaving it ungated costs nothing measurable here. Standard
+   caveat: 0/200 does not prove it never fires on the private 800.
+2. **`Agent.apply_config` does pick this up** (`agent.py:84` sets
+   `self.config`), so the gate is live under `tools.evalkit.Bench` and a
+   future tuning sweep will actually move it. Checked explicitly because this
+   file records two separate build-time-vs-request-time no-op traps
+   (`rerank_depth`, the brand gate) that were only caught by asking.
+
+**Honesty, three ways.** (a) Roughly 20 configurations were scored against
+these same 200 sessions producing the PRD, on top of the 16+ already recorded
+— **quote fold B (+0.0259), not the full-set +0.0273**, in anything
+downstream. The mitigating structural argument is that this is *one* parameter
+over a smooth broad plateau, the safest shape of fit available, categorically
+unlike the 33-free-parameter reranker work that failed here. (b) **HR@10
+1.0000 at τ≤0.054 is a property of this sample, one session deep, not of the
+threshold.** `public_0020` is visible on exactly one turn at NQC 0.0546 —
+between τ=0.054 (show, keep it) and τ=0.056 (hold, lose it permanently).
+Expect to lose ~0.5% of sessions to this at any τ in the plateau on the
+private 800; it is already priced into fold B. (c) **Part of this gain is a
+scoring artifact and should be described as such.** The reason holding pays is
+that the session dies at first hit — real shoppers do not do that; shown a
+mediocre list they keep talking and you get another attempt free. First-hit-
+break is a measurement convention for time-to-first-success, not a model of
+customer patience. This is optimising against the evaluator, which *is* the
+task, but it is **not** evidence users would prefer it. The outside literature
+splits the same way: EAR (Lei et al., WSDM 2020) supports acting only when the
+recommender is confident, while three experiments on withheld information
+(n = 1,811/905/801) found conversational withholding *worse* than in a normal
+UI — mitigated specifically by showing results alongside the question, which
+is what this policy stops doing. §5's preference for the shortest hold is
+partly motivated by that.
+
+**Rollback is one config value:** `min_recommend_confidence: 0.0`, verified
+byte-identical at 0.909328. That is why the field is a threshold rather than a
+boolean — no code path to remove.
+
+**Status: adopted in `config/tuned.json`, NOT committed** (explicit
+instruction). All seven PRD acceptance criteria pass: default-off byte-
+identical ✓, 56/56 tests ✓, single `nqc` ✓, live 0.936614 ✓, offline_eval
+200/200 ✓, fold B +0.0259 ≥ +0.020 ✓, `results.json` untouched ✓. Note the
+`.githooks/pre-commit` guard will require `CLAUDE.md` staged alongside
+`config/tuned.json` whenever this is committed — both are already modified
+together.
 
 **Gender hierarchy fix (live) + brand false-positive gate (adopted, config
 now on) -- both correctness fixes with zero measured public-set effect,
@@ -1742,10 +1872,13 @@ best a wash.
 ## Roadmap (ordered by expected impact)
 
 Measured against the live 0.862111, not `docs/pending.md`'s 0.7848-era figures.
+**The impact column below is stale wherever it predates the 2026-08-31 gate;
+the "Current state" table is authoritative.**
 
 | priority | item | impact | notes |
 |----------|------|--------|-------|
-| **high** | **Selective withholding / ask-one-more before recommending** | **≤ +0.036 to +0.045** | the finding of 2026-08-31. 45/75 sub-rank-1 sessions lock in at turn 1; the conjunction that separates them is disclosed later. Ceiling measured at 0.9449-0.9533 (MTTC fixed). Blanket withholding was rejected before, but its dominant cost (HR@10 -0.030 from disclosure hurting retrieval) is the exact mechanism the injection removed. Must be confidence-gated, not blanket, and must be measured on fold B |
+| ~~high~~ | ~~Selective withholding / ask-one-more before recommending~~ | **+0.027 banked** | **DONE 2026-08-31 — shipped as the confidence-gated hold, 0.909328 → 0.936614, fold B +0.0259.** It landed confidence-gated and fold-B-measured exactly as this row required. Predicted "≤ +0.036 to +0.045"; delivered +0.027, and the shortfall is the deliberate choice of the plateau's low edge over its high end (τ=0.085 reaches 0.9413) because fold B is tied there. See "What was found" |
+| **high** | **Push the hold past the plateau's low edge — only with new evidence** | ≤ +0.005 | the remaining gap between τ=0.054 (0.9366) and the sweep's best public-set point (τ=0.085, 0.9413) is real but sits entirely in fold A. Not worth taking on the public set's say-so; would need either the private-set feedback or a per-intent variant. `buying` is the only scenario carrying HR risk, so an intent-conditional threshold is the obvious shape |
 | ~~high~~ | ~~New feature for the rank-2 cases~~ | — | **superseded 2026-08-31.** The separating feature already exists and already has weight; it has nothing to act on at turn 1. Read the text-read entry before building any new column |
 | high | Browsing recall | ~+0.02 | was 5 of 8 misses and the worst MRR. **HR@10 is now 1.000 across every scenario**, so the recall half is closed; browsing MRR (0.6833) is still the weakest and is squarely in the disclosure-timing bucket above |
 | medium | Ranks 6-10 → 1 | +0.0246 | 19 sessions. Same caveat as rank 2 — assume a feature problem until a diagnostic says otherwise |
