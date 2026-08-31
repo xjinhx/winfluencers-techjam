@@ -1,0 +1,30 @@
+.dev-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: rgba(61, 219, 217, 0.12);
+  border-bottom: 1px solid var(--color-stroke-on-dark);
+  flex-shrink: 0;
+}
+
+.dev-banner-tag {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-teal);
+  color: #0d0d0f;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.dev-banner-text {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--color-text-on-dark-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

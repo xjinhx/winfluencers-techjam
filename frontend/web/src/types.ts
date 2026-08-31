@@ -17,6 +17,7 @@ export interface RespondResult {
 export interface DemoProfile {
   sample_id: string;
   user_profile: Record<string, unknown>;
+  ground_truth?: EnrichedProduct | null;
 }
 
 export type ChatRole = "user" | "agent";

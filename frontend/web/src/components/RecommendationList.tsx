@@ -15,21 +15,28 @@ function matchedLine(product: EnrichedProduct, disclosed: string[]): string {
 export function RecommendationList({
   products,
   disclosedTerms,
+  targetAsin,
 }: {
   products: EnrichedProduct[];
   disclosedTerms: string[];
+  targetAsin?: string | null;
 }) {
   return (
     <div className="recommendation-list">
       {products.map((product, i) => {
         const rank = i + 1;
+        const isTarget = targetAsin != null && product.parent_asin === targetAsin;
         return (
-          <div className="recommendation-item" key={product.parent_asin}>
+          <div
+            className={`recommendation-item${isTarget ? " recommendation-item-target" : ""}`}
+            key={product.parent_asin}
+          >
             <div className="recommendation-meta">
               <span className={`rank-pill ${rank % 2 === 0 ? "rank-pill-rose" : "rank-pill-teal"}`}>
                 #{rank}
               </span>
               <span className="matched-note">{matchedLine(product, disclosedTerms)}</span>
+              {isTarget ? <span className="target-badge">DEV · TARGET MATCH</span> : null}
             </div>
             <ProductCard product={product} />
           </div>

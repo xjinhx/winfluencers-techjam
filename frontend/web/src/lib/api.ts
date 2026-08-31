@@ -23,8 +23,8 @@ export function respond(session_id: string, user_message: string, turn: number, 
   return request<RespondResult>("/respond", { session_id, user_message, turn, top_k });
 }
 
-export async function fetchDemoProfile(): Promise<DemoProfile> {
-  const res = await fetch(`${API_URL}/demo-profile`);
+export async function fetchDemoProfile(dev = false): Promise<DemoProfile> {
+  const res = await fetch(`${API_URL}/demo-profile${dev ? "?dev=1" : ""}`);
   if (!res.ok) throw new Error(`/demo-profile failed (${res.status})`);
   return res.json() as Promise<DemoProfile>;
 }

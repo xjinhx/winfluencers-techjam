@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { StatusBar } from "../components/StatusBar";
 import { ChatHeader } from "../components/ChatHeader";
+import { DevBanner } from "../components/DevBanner";
 import { UserBubble, AgentBubble } from "../components/ChatBubble";
 import { QuickReplies } from "../components/QuickReplies";
 import { RecommendationList } from "../components/RecommendationList";
 import { InputBar } from "../components/InputBar";
 import { fetchDemoProfile, resetSession, respond } from "../lib/api";
 import { quickRepliesFor } from "../lib/presentation";
-import type { ChatTurn } from "../types";
+import type { ChatTurn, EnrichedProduct } from "../types";
 import "./Chat.css";
 
 const TURN_LIMIT = 10;
+
+// Separate from the normal demo: append ?dev=1 to the URL to reveal the
+// ground-truth target for the session and highlight it in the recommendation
+// list, so you can check whether the agent actually found the right item.
+// Off by default -- a normal visitor never sees this.
+const DEV_MODE =
+  typeof window !== "undefined" && new URLSearchParams(window.location.search).get("dev") === "1";
 
 const FALLBACK_PROFILE = {
   average_prior_rating: 4.5,
@@ -38,6 +46,8 @@ export function Chat({ onBack }: { onBack: () => void }) {
   const [sessionReady, setSessionReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [devSampleId, setDevSampleId] = useState<string | null>(null);
+  const [devTarget, setDevTarget] = useState<EnrichedProduct | null>(null);
   const sessionIdRef = useRef(newId());
   const disclosedRef = useRef<string[]>([]);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
@@ -47,8 +57,12 @@ export function Chat({ onBack }: { onBack: () => void }) {
     (async () => {
       let profile: Record<string, unknown> = FALLBACK_PROFILE;
       try {
-        const demo = await fetchDemoProfile();
+        const demo = await fetchDemoProfile(DEV_MODE);
         profile = demo.user_profile;
+        if (DEV_MODE && !cancelled) {
+          setDevSampleId(demo.sample_id);
+          setDevTarget(demo.ground_truth ?? null);
+        }
       } catch {
         // API not reachable yet -- fall back to a representative profile so
         // the thread still opens; /reset below will surface the real error.
@@ -104,6 +118,7 @@ export function Chat({ onBack }: { onBack: () => void }) {
     <div className="chat-screen">
       <StatusBar />
       <ChatHeader turn={turn} turnLimit={TURN_LIMIT} ended={ended} onBack={onBack} />
+      {DEV_MODE ? <DevBanner sampleId={devSampleId} target={devTarget} /> : null}
 
       <div className="chat-thread">
         {turns.map((t) =>
@@ -116,7 +131,11 @@ export function Chat({ onBack }: { onBack: () => void }) {
                 <QuickReplies replies={t.quickReplies} disabled={busy || ended} onPick={send} />
               ) : null}
               {t.recommendations && t.recommendations.length > 0 ? (
-                <RecommendationList products={t.recommendations} disclosedTerms={disclosedRef.current} />
+                <RecommendationList
+                  products={t.recommendations}
+                  disclosedTerms={disclosedRef.current}
+                  targetAsin={DEV_MODE ? devTarget?.parent_asin : null}
+                />
               ) : null}
             </div>
           ),
@@ -132,7 +151,7 @@ export function Chat({ onBack }: { onBack: () => void }) {
 
       <InputBar
         disabled={busy || ended || !sessionReady}
-        placeholder={ended ? "Session ended" : "Message the Copilot…"}
+        placeholder={ended ? "Session ended" : "Message Buyte…"}
         onSend={send}
       />
     </div>

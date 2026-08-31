@@ -76,7 +76,7 @@ def _ensure_catalog() -> None:
 
 _ensure_catalog()
 
-app = FastAPI(title="Shopping Copilot Demo API")
+app = FastAPI(title="Buyte Demo API")
 
 _frontend_origin = os.environ.get("FRONTEND_ORIGIN", "")
 _allow_origins = [o.strip() for o in _frontend_origin.split(",") if o.strip()] or ["*"]
@@ -111,7 +111,13 @@ def _load_demo_profiles() -> list[dict[str, Any]]:
             row = json.loads(line)
             profile = row.get("user_profile")
             if profile:
-                profiles.append({"sample_id": row.get("sample_id", ""), "user_profile": profile})
+                profiles.append(
+                    {
+                        "sample_id": row.get("sample_id", ""),
+                        "user_profile": profile,
+                        "ground_truth": row.get("ground_truth"),
+                    }
+                )
     return profiles
 
 
@@ -159,10 +165,18 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/demo-profile")
-def demo_profile() -> dict[str, Any]:
+def demo_profile(dev: bool = False) -> dict[str, Any]:
     if not _demo_profiles:
         raise HTTPException(status_code=503, detail="No public_set.jsonl available on this server.")
-    return random.choice(_demo_profiles)
+    picked = random.choice(_demo_profiles)
+    if not dev:
+        return {"sample_id": picked["sample_id"], "user_profile": picked["user_profile"]}
+    ground_truth = picked.get("ground_truth")
+    return {
+        "sample_id": picked["sample_id"],
+        "user_profile": picked["user_profile"],
+        "ground_truth": _enrich(ground_truth["parent_asin"]) if ground_truth else None,
+    }
 
 
 @app.post("/reset")

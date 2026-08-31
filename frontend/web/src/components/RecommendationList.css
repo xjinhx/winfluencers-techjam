@@ -44,3 +44,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.recommendation-item-target .product-card {
+  outline: 2px solid var(--color-accent-teal);
+  outline-offset: 2px;
+  border-radius: var(--radius-card);
+}
+
+.target-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 9.5px;
+  letter-spacing: 0.2px;
+  color: #0d0d0f;
+  background: var(--color-accent-teal);
+  flex-shrink: 0;
+}
