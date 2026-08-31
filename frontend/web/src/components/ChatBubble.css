@@ -1,0 +1,48 @@
+.bubble-row {
+  display: flex;
+  width: 100%;
+}
+
+.bubble-row-user {
+  justify-content: flex-end;
+}
+
+.bubble-row-agent {
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.bubble-avatar-small {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #3ddbd9 0%, #26a6ad 71.4%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bubble {
+  max-width: 260px;
+  padding: 12px 14px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.bubble p {
+  margin: 0;
+}
+
+.bubble-user {
+  background: var(--color-accent-teal);
+  color: #0d0d0f;
+  border-radius: 18px 18px 6px 18px;
+}
+
+.bubble-agent {
+  background: var(--color-bg-shell-dark-raised);
+  color: var(--color-text-on-dark-primary);
+  border-radius: 18px 18px 18px 6px;
+}
