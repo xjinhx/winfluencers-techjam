@@ -2,6 +2,7 @@ import { StatusBar } from "../components/StatusBar";
 import { BottomNav } from "../components/BottomNav";
 import { AskCopilotPill } from "../components/AskCopilotPill";
 import { ProductCard } from "../components/ProductCard";
+import { RotatingPhrase } from "../components/RotatingPhrase";
 import { TRENDING_PRODUCTS } from "../data/trending";
 import searchIcon from "../assets/icons/search.svg";
 import heroEllipse from "../assets/icons/hero-ellipse.svg";
@@ -44,7 +45,7 @@ export function Storefront({ onAskCopilot }: { onAskCopilot: () => void }) {
             </div>
             <div className="hero-copy">
               <h2 className="hero-title">
-                Sweater weather,
+                <RotatingPhrase />,
                 <br />
                 sorted for you.
               </h2>
