@@ -44,10 +44,36 @@ from evaluator.local_evaluator import (
     materialize_hidden_fields,
 )
 from shopping_copilot.catalog import Catalog
+# Imported rather than re-declared so this tool cannot drift out of sync with
+# the matcher it is measuring. If `active_spans()` changes how it normalises,
+# these numbers change with it.
+from shopping_copilot.state import _SYNTHETIC_SPAN_RE
+
+
+def normalise(text: str) -> str | None:
+    """Reproduce `ShoppingState.active_spans()` exactly.
+
+    This is the whole correctness of the tool. The spans the injection matches
+    on are not the raw card strings: they are lowercased, whitespace-collapsed,
+    dropped below four characters, and -- since 2026-08-31 -- unwrapped from the
+    `color: X` template the simulator manufactures. Measuring the raw strings
+    instead counts every synthesised colour span as matching zero products,
+    which silently inflates colour's apparent selectivity.
+    """
+    text = " ".join(str(text).lower().split())
+    if len(text) <= 3:
+        return None
+    synthetic = _SYNTHETIC_SPAN_RE.match(text)
+    if synthetic:
+        text = synthetic.group(1).strip()
+        if not text:
+            return None
+    return text
 
 
 def disclosed_spans(card: dict, attribute: str) -> list[str]:
-    """What `customer_reply` would hand back for this attribute.
+    """What `customer_reply` would hand back for this attribute, normalised the
+    way the retriever will actually see it.
 
     Mirrors the evaluator: every hard constraint then every soft preference,
     filtered by `classify_constraint`, capped at two per turn. 'other' matches
@@ -57,10 +83,11 @@ def disclosed_spans(card: dict, attribute: str) -> list[str]:
         *[str(v) for v in card.get("hard_constraints", [])],
         *[str(v) for v in card.get("soft_preferences", [])],
     ]
-    return [
+    picked = [
         value for value in constraints
         if attribute == "other" or classify_constraint(value) == attribute
     ][:2]
+    return [span for span in (normalise(v) for v in picked) if span]
 
 
 def main() -> None:
@@ -85,14 +112,14 @@ def main() -> None:
 
     # One catalog pass per distinct span. The injection tests `span in
     # search_blob`, so measure exactly that rather than a token approximation.
-    unique = {s.lower() for rows in per_attribute.values() for r in rows for s in r}
+    unique = {s for rows in per_attribute.values() for r in rows for s in r}
     print(f"scanning {len(unique)} distinct spans over {total} products...")
     survivors: dict[str, int] = {}
     for span in sorted(unique):
         survivors[span] = sum(1 for blob in blobs if span in blob)
 
     def bits(span: str) -> float:
-        n = survivors.get(span.lower(), 0)
+        n = survivors.get(span, 0)
         # A span nothing contains cannot narrow anything the ranker can use.
         return math.log2(total / n) if n > 0 else 0.0
 
@@ -101,7 +128,7 @@ def main() -> None:
         rows = per_attribute[attribute]
         answered = [r for r in rows if r]
         span_bits = [bits(s) for r in answered for s in r]
-        span_survivors = [survivors.get(s.lower(), 0) for r in answered for s in r]
+        span_survivors = [survivors.get(s, 0) for r in answered for s in r]
         yield_rate = len(answered) / len(rows) if rows else 0.0
         median_bits = statistics.median(span_bits) if span_bits else 0.0
         report[attribute] = {
