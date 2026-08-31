@@ -32,93 +32,35 @@ img {
   display: block;
 }
 
-/* Base (tablet-ish default): floating phone mockup, centered on a plain
-   dark ground -- the layout this app shipped with originally. */
+/* Fullscreen at every width: the app fills the viewport, no floating
+   mockup, no frame chrome, no side panel. Mobile-first: below the first
+   breakpoint the thread runs edge to edge like a native app. */
 .app-shell {
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 24px 0;
-}
-
-.app-desktop-panel {
-  display: none;
-}
-
-.app-stage {
+  height: 100vh;
   display: flex;
   justify-content: center;
 }
 
 .phone-frame {
-  width: 390px;
-  height: 844px;
-  max-height: calc(100vh - 48px);
+  width: 100%;
+  height: 100vh;
+  max-height: 100vh;
   background: var(--color-bg-shell-dark);
-  border-radius: 44px;
   overflow: hidden;
   position: relative;
-  box-shadow:
-    0 40px 80px rgba(0, 0, 0, 0.55),
-    0 0 0 8px #000;
   display: flex;
   flex-direction: column;
 }
 
-/* Phone breakpoint: edge-to-edge, no mockup chrome -- a real phone browser
-   gets the app itself, not a picture of a phone. */
-@media (max-width: 460px) {
-  .app-shell {
-    padding: 0;
-  }
+/* Tablet and up: cap the column so a single conversation thread doesn't
+   stretch edge to edge on a wide screen. Still full viewport height, still
+   no mockup chrome -- just a centered, bounded column with a hairline edge,
+   the same shape any responsive chat app settles into on a laptop. */
+@media (min-width: 640px) {
   .phone-frame {
-    width: 100vw;
-    height: 100vh;
-    max-height: 100vh;
-    border-radius: 0;
-    box-shadow: none;
-  }
-}
-
-/* Laptop/desktop breakpoint: the mockup gets a proper page around it
-   instead of floating alone on empty black. */
-@media (min-width: 1024px) {
-  .app-shell {
-    justify-content: center;
-    align-items: center;
-    gap: 72px;
-    padding: 0 64px;
-    background:
-      radial-gradient(circle at 12% 18%, rgba(61, 219, 217, 0.14), transparent 45%),
-      radial-gradient(circle at 88% 82%, rgba(61, 219, 217, 0.08), transparent 40%),
-      #050506;
-  }
-
-  .app-desktop-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    max-width: 380px;
-  }
-
-  .app-wordmark {
-    font-family: var(--font-display);
-    font-size: 48px;
-    font-weight: 600;
-    letter-spacing: -0.5px;
-    background: linear-gradient(135deg, #3ddbd9 0%, #26a6ad 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  .app-tagline {
-    font-family: var(--font-body);
-    font-size: 16px;
-    line-height: 1.55;
-    color: var(--color-text-on-dark-secondary);
-    margin: 0;
+    max-width: 480px;
+    border-left: 1px solid var(--color-stroke-on-dark);
+    border-right: 1px solid var(--color-stroke-on-dark);
   }
 }
 
