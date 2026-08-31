@@ -100,6 +100,23 @@
   height: 380px;
 }
 
+.hero-mascot {
+  position: absolute;
+  right: 14px;
+  bottom: -6px;
+  height: 130px;
+  width: auto;
+  z-index: 1;
+}
+
+@media (min-width: 640px) {
+  .hero-mascot {
+    right: 36px;
+    bottom: -10px;
+    height: 230px;
+  }
+}
+
 .hero-feature-inner {
   position: absolute;
   inset: 0;

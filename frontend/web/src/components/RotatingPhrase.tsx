@@ -33,7 +33,7 @@ export function RotatingPhrase() {
 
   return (
     <span className={`rotating-phrase${visible ? "" : " rotating-phrase-fade"}`}>
-      {PHRASES[index]}
+      {PHRASES[index]},
     </span>
   );
 }

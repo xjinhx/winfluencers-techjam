@@ -38,6 +38,7 @@ export function Storefront({ onAskCopilot }: { onAskCopilot: () => void }) {
       <div className="storefront-content">
         <div className="hero-feature">
           <img className="hero-ellipse" src={heroEllipse} alt="" />
+          <img className="hero-mascot" src="/buyte-mascot.png" alt="" />
           <div className="hero-feature-inner">
             <div className="hero-badge">
               <img src={badgeDot} alt="" width={6} height={6} />
@@ -45,7 +46,7 @@ export function Storefront({ onAskCopilot }: { onAskCopilot: () => void }) {
             </div>
             <div className="hero-copy">
               <h2 className="hero-title">
-                <RotatingPhrase />,
+                <RotatingPhrase />
                 <br />
                 sorted for you.
               </h2>
