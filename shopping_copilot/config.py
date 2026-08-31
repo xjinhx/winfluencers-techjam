@@ -219,6 +219,42 @@ class DialogueConfig:
     # chance at a hit that MTTC would have rewarded.
     recommend_on_ask_turns: bool = True
 
+    # D2 has a cost D2 did not price. The evaluator stops the session at the
+    # first turn the target appears in the top ten, so that rank is final --
+    # surfacing a weak list early does not just miss a better rank later, it
+    # forecloses it. On the public set 45 sessions hit on turn 1 at rank >= 2,
+    # carrying 15.5 of a possible 45 reciprocal rank.
+    #
+    # The arithmetic favours waiting by a wide margin: one turn of delay costs
+    # 0.2/(10*200) = 0.0001 of the score, while one rank-2 -> rank-1 conversion
+    # gains 0.3*0.5/200 = 0.00075. A turn is worth spending whenever it buys
+    # more than 0.067 of reciprocal rank.
+    #
+    # Both default to exact no-ops; they are levers for an experiment, not a
+    # behaviour change. `recommend_min_confidence` gates on the same NQC signal
+    # the clarifier already uses to decide whether to ask.
+    recommend_min_turn: int = 1
+    recommend_min_confidence: float = 0.0
+
+    # The selective form of the same idea, and the one worth preferring: wait
+    # for *evidence*, not for a turn number. `recommend_min_turn` silences every
+    # session equally, including the 70 of 200 whose top-1 is already the target
+    # on turn 1 -- pure MTTC cost for no rank gain, and the sessions where the
+    # agent looks worst for refusing to answer.
+    #
+    # Measured on the public set, split by what the shopper has disclosed at
+    # turn 1: with one constraint span the target is already at rank 1 in 57 of
+    # 110 sessions (52%); with none it is 13 of 90 (14%). A 3.7x separation,
+    # observable without labels, no model and no fitted threshold -- 1 is simply
+    # "the shopper has said something concrete", which is why it is set on
+    # principle rather than swept.
+    #
+    # `recommend_max_wait` is the safety cap: past it, answer regardless, so a
+    # customer who never discloses anything is not met with silence forever.
+    # Defaults are inert (min_spans 0 can never exceed a span count).
+    recommend_min_spans: int = 0
+    recommend_max_wait: int = 3
+
     # Expected disclosure per attribute -- *measured*, not guessed. Produced by
     # `python -m tools.measure_attribute_yield` over the 200 public sessions:
     # normalised mean characters of new product text a question elicits.
