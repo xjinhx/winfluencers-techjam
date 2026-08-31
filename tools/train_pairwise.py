@@ -114,7 +114,7 @@ def build_pairs(
         if target not in by_asin:
             continue  # recall failure this turn, not a ranking example
         intent = rows[0].get("intent")
-        ordered = rank_turn(rows, lambda vec, i=intent: scorer(vec, i))
+        ordered, _ = rank_turn(rows, lambda vec, i=intent: scorer(vec, i))
         target_rank = ordered.index(target)
         if target_rank == 0:
             continue  # already ranked first -- nothing to learn from this turn

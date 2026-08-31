@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from shopping_copilot.catalog import Catalog
-from shopping_copilot.clarify import ALLOWED_ATTRIBUTES
+from shopping_copilot.clarify import ALLOWED_ATTRIBUTES, ClarificationPolicy, nqc
 from shopping_copilot.config import Config
 from shopping_copilot.features import FEATURE_NAMES, ScoringContext, extract
 from shopping_copilot.profile import ShopperProfile
@@ -334,6 +335,42 @@ class ConstraintTests(unittest.TestCase):
         self.assertEqual(constraints.gender, "women")
         self.assertIn("leather", constraints.materials)
 
+    def test_kids_is_a_parent_of_boys_and_girls_not_a_sibling(self):
+        # A customer who says "toddler" sets gender="kids"; a listing filed
+        # `boys` satisfies that. Treating them as siblings made 313 catalog
+        # rows score VIOLATED (-0.23) against their own opening line.
+        boys = self.catalog.get("B000000003")
+        self.assertEqual(boys.effective_gender, "boys")
+        self.assertEqual(check_gender(boys, Constraints(gender="kids")), SATISFIED)
+        # The reverse is missing specificity, not contrary evidence.
+        as_kids = replace(boys, gender="kids", gender_fallback="kids")
+        self.assertEqual(check_gender(as_kids, Constraints(gender="boys")), UNKNOWN)
+        # ...but siblings genuinely conflict, and adult rules are untouched.
+        self.assertEqual(check_gender(boys, Constraints(gender="girls")), VIOLATED)
+        self.assertEqual(
+            check_gender(self.catalog.get("B000000002"), Constraints(gender="women")),
+            VIOLATED,
+        )
+
+    def test_specific_child_audience_beats_the_generic_one(self):
+        # "baby" hit first and resolved to `kids`, discarding the "girls"
+        # standing next to it -- and the opening line is built from the
+        # target's own category path, so this phrasing is common.
+        self.assertEqual(
+            self.extractor.update(Constraints(), "Baby Girls Bodysuits").gender, "girls"
+        )
+        self.assertEqual(
+            self.extractor.update(Constraints(), "Baby Boys Bodysuits").gender, "boys"
+        )
+        # A generic phrase still resolves generically, and first-match
+        # semantics are preserved everywhere else.
+        self.assertEqual(
+            self.extractor.update(Constraints(), "toddler pajamas").gender, "kids"
+        )
+        self.assertEqual(
+            self.extractor.update(Constraints(), "kids shoes for women").gender, "kids"
+        )
+
 
 class FeatureTests(unittest.TestCase):
     def setUp(self):
@@ -568,6 +605,58 @@ def _tiny_catalog():
         path.write_text(json.dumps(row) + chr(10), encoding="utf-8")
         catalog = Catalog(str(path))
     return catalog, catalog.by_asin["SPANTEST1"]
+
+
+class RecommendationGateTests(unittest.TestCase):
+    """The NQC recommendation gate (`DialogueConfig.min_recommend_confidence`).
+
+    The evaluator breaks on first hit, so an early list locks in whatever rank
+    it has. These pin the two things that must not drift: `nqc` has one
+    definition shared by the ask gate and the recommendation gate, and the
+    gate's own arithmetic -- including that 0.0 is a true off-switch, which is
+    what makes rollback a config value rather than a code change.
+    """
+
+    def test_confidence_delegates_to_module_level_nqc(self):
+        # A second copy of this formula is the failure mode CLAUDE.md already
+        # records once (offline_eval's stale unknown-penalty loop).
+        scores = [0.9, 0.4, 0.35, 0.3, 0.1]
+        policy = ClarificationPolicy(Config().dialogue)
+        self.assertEqual(policy._confidence(scores), nqc(scores))
+
+    def test_nqc_edge_cases(self):
+        self.assertEqual(nqc([]), 1.0, "no pool cannot be uncommitted")
+        self.assertEqual(nqc([0.5]), 1.0, "a single candidate is fully separated")
+        self.assertEqual(nqc([0.0, 0.0]), 0.0, "a non-positive top score cannot normalise")
+        self.assertEqual(nqc([1.0, 1.0, 1.0]), 0.0, "bunched scores mean no commitment")
+
+    def test_nqc_reads_only_the_top_ten(self):
+        # The live gate passes the whole ranked pool; the replay in
+        # tools/offline_eval passes the same. Both must ignore the tail.
+        head = [1.0] + [0.5] * 9
+        self.assertEqual(nqc(head), nqc(head + [0.01] * 500))
+
+    def test_gate_arithmetic_matches_the_replay(self):
+        from tools.offline_eval import recommendations_withheld
+
+        config = Config()
+        config.dialogue.min_recommend_confidence = 0.054
+        config.dialogue.recommend_turn_fallback = 3
+        bunched = [1.0] + [0.999] * 9      # nqc ~ 0, well under the threshold
+        spread = [1.0] + [0.2] * 9         # nqc well over it
+
+        self.assertTrue(recommendations_withheld(bunched, 1, config))
+        self.assertFalse(recommendations_withheld(spread, 1, config),
+                         "a committed ranker must not be held back")
+        self.assertFalse(recommendations_withheld(bunched, 3, config),
+                         "the fallback turn always shows, however uncommitted")
+
+    def test_zero_threshold_disables_the_gate(self):
+        from tools.offline_eval import recommendations_withheld
+
+        config = Config()   # min_recommend_confidence defaults to 0.0
+        self.assertFalse(recommendations_withheld([1.0] + [0.999] * 9, 1, config))
+        self.assertFalse(recommendations_withheld([1.0] + [0.999] * 9, 1, None))
 
 
 if __name__ == "__main__":

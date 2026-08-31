@@ -201,10 +201,14 @@ which is what makes offline replay possible at all, and it puts the popularity
 prior in the reranker where it can be ablated rather than in candidate selection
 where it would silently delete the ~5% of targets below the popular tail.
 
-**D2 — recommend on ask-turns.** Yes. Nothing in the schema makes
-`ask_attribute` and `recommendations` exclusive, first-hit turn drives MTTC, and
-a silent turn is a discarded chance at the hit. 57 of 200 sessions convert on
-turn 1.
+**D2 — recommend on ask-turns. Yes, but gated on evidence. Revised
+2026-08-31.** The original reasoning — nothing in the schema makes
+`ask_attribute` and `recommendations` exclusive, first-hit turn drives MTTC, a
+silent turn is a discarded chance at the hit — holds for HR@10 and MTTC and is
+wrong for MRR. The evaluator breaks on first hit, so an early weak list fixes
+the rank permanently. Two gates now withhold while the turn is uninformative
+(`recommend_min_spans`, `min_recommend_confidence`); together they take the
+score 0.909328 -> 0.942939 with HR@10 unchanged at 1.000.
 
 **D3 — LLM reranker.** Not built. Listwise LLM rankers are order-sensitive,
 which is a determinism problem for a graded submission, and official scoring may

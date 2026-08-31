@@ -13,10 +13,15 @@ section 7 possible at all -- and it puts the popularity prior in the reranker,
 where it can be ablated, rather than in candidate selection, where it would
 silently delete the ~5% of targets that sit below the popular tail.
 
-**D2 (recommend on ask-turns).** Yes. Nothing in the response schema makes
-`ask_attribute` and `recommendations` mutually exclusive, first-hit turn drives
-MTTC, and a turn that returns nothing is a discarded chance at the hit. The
-agent asks *and* answers on the same turn.
+**D2 (recommend on ask-turns).** Yes -- but not before the evidence arrives.
+Nothing in the response schema makes `ask_attribute` and `recommendations`
+mutually exclusive, so the agent asks *and* answers on the same turn. That
+argument is correct for HR@10 and MTTC and wrong for MRR: the evaluator breaks
+on first hit, so a weak early list does not miss a better rank later, it
+forecloses it. Two gates below hold the list back while a turn is
+uninformative -- `recommend_min_spans` (has the customer said anything
+concrete?) and `min_recommend_confidence` (has the ranker committed?). They
+read different signals, compound, and are both inert at their defaults.
 
 No LLM call anywhere on the turn path. The system is fully offline and
 deterministic; `usage` is reported as zero because no model is invoked.
@@ -28,7 +33,7 @@ import json
 from pathlib import Path
 
 from .catalog import Catalog
-from .clarify import ClarificationPolicy
+from .clarify import ClarificationPolicy, nqc
 from .config import Config, DEFAULT_CONFIG
 from .dense import build_dense_route
 from .features import ScoringContext
@@ -53,7 +58,10 @@ class Agent:
         self.catalog = Catalog(catalog_path)
         self.lexical = LexicalIndex(self.catalog, self.config.retrieval)
         self.dense = build_dense_route(self.catalog, self.config.retrieval)
-        self.extractor = ConstraintExtractor(self.catalog)
+        self.extractor = ConstraintExtractor(self.catalog, self.lexical.commonness)
+        self.extractor.brand_max_text_commonness = (
+            self.config.retrieval.brand_max_text_commonness
+        )
         self.ranker = Ranker(
             self.config.ranking, self.config.priors, self.config.constraints
         )
@@ -87,6 +95,9 @@ class Agent:
             field: getattr(config.retrieval, f"w_{field}")
             for field in self.lexical.fields
         }
+        self.extractor.brand_max_text_commonness = (
+            config.retrieval.brand_max_text_commonness
+        )
         self.ranker = Ranker(config.ranking, config.priors, config.constraints)
         self.clarifier = ClarificationPolicy(config.dialogue)
         self.sessions.clear()
@@ -261,6 +272,21 @@ class Agent:
             if (clarification.attribute is None or dialogue.recommend_on_ask_turns)
             else []
         )
+
+        # Recommendation gate. The evaluator breaks on first hit, so the rank
+        # we are scored on is fixed at the moment we know least: turn 1 is
+        # close to information-free by construction (a browsing opener
+        # discloses zero spans, and the category names hundreds of
+        # near-identical listings). Hold until the ranker has actually
+        # committed -- NQC over the ordered pool -- or until the fallback
+        # turn, whichever comes first. Composes with `recommend_on_ask_turns`
+        # as an AND: either may suppress.
+        dialogue = self.config.dialogue
+        if recommendations and dialogue.min_recommend_confidence > 0.0:
+            if (turn < dialogue.recommend_turn_fallback
+                    and nqc([s for _, s in ranked]) < dialogue.min_recommend_confidence):
+                recommendations = []
+
         return {
             "message": clarification.message,
             "ask_attribute": clarification.attribute,

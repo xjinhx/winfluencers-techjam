@@ -41,9 +41,9 @@ from tools.offline_eval import (
 )
 
 
-def gap_rows(groups, joined, scorer, weights, ranks, max_winners, config_ranking):
+def gap_rows(groups, joined, scorer, weights, ranks, max_winners, config_ranking, config=None):
     """One record per (session, winning candidate) pair in the rank band."""
-    replay = offline_metrics(groups, joined, scorer)
+    replay = offline_metrics(groups, joined, scorer, config)
     by_sample = {label["sample_id"]: (sid, label) for sid, label in joined.items()}
     selected = [
         s for s in replay["sessions"]
@@ -60,7 +60,8 @@ def gap_rows(groups, joined, scorer, weights, ranks, max_winners, config_ranking
         turn = session["first_hit_turn"]
         rows = by_session[sid][turn]
         vectors = {r["candidate_asin"]: r["features"] for r in rows}
-        ordered = rank_turn(rows, scorer)[:TOP_K]
+        ordered, _ = rank_turn(rows, scorer)
+        ordered = ordered[:TOP_K]
 
         turn_intent = rows[0].get("intent")
         turn_weights = dict(weights)
@@ -168,7 +169,7 @@ def main() -> None:
     joined = join_by_order(order, labels)
     scorer = ReplayScorer(config)
 
-    selected, records = gap_rows(groups, joined, scorer, weights, ranks, args.max_winners, config.ranking)
+    selected, records = gap_rows(groups, joined, scorer, weights, ranks, args.max_winners, config.ranking, config)
     print(f"sessions at ranks {sorted(ranks)}: {len(selected)}")
     if not records:
         print("no comparable pairs found")

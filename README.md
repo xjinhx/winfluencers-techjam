@@ -15,7 +15,8 @@ evaluator (`evaluator/local_evaluator.py`, unmodified).
 |---|---|---|---|---|
 | Official weak BM25 baseline | 0.125 | 0.068 | 9.81 | 0.1067 |
 | Ours — default weights | 0.885 | 0.554 | 3.23 | 0.7641 |
-| **Ours — tuned** | **0.960** | **0.690** | **2.24** | **0.8621** |
+| **Ours — tuned** | **1.000** | **0.902** | **2.39** | **0.9429** |
+| *superseded 2026-08-31* | *0.960* | *0.690* | *2.24* | *0.8621* |
 
 `TechnicalScore = 0.50 × HR@10 + 0.30 × MRR + 0.20 × Efficiency`
 
@@ -224,10 +225,10 @@ Runs all 200 public sessions and writes per-session results and aggregate
 metrics to `results.json`. Expected output:
 
 ```
-HR@10  0.960
-MRR    0.690
-MTTC   2.24
-TechnicalScore  0.8621
+HR@10  1.000
+MRR    0.902464
+MTTC   2.39
+TechnicalScore  0.942939
 ```
 
 Tuned weights live in `config/tuned.json` and are loaded automatically by

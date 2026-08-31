@@ -49,6 +49,18 @@ class RetrievalConfig:
     # preserves prior behaviour exactly).
     constraint_commonness_penalty: float = 0.0
 
+    # Drop a single-word brand match when that word is this common as ordinary
+    # listing text (max document-frequency ratio over title/features/
+    # categories, the same measure as `commonness` above). The hand-written
+    # BRAND_BLOCKLIST missed the words the simulator actually quotes: measured
+    # live at the lock-in turn, 62 of 66 brand extractions across the 200
+    # public sessions were wrong, from "Machine Wash" and "Rubber sole".
+    # Ordinary words and real single-word brands separate by two orders of
+    # magnitude (sole 0.206 / wash 0.317 vs hanes 0.0021 / skechers 0.0077),
+    # so the cut is not delicate. 0.0 = disabled (default, byte-identical to
+    # the pre-measurement behaviour).
+    brand_max_text_commonness: float = 0.0
+
     # Convex combination, not RRF (Bruch et al. 2210.11934). One parameter,
     # tunable on 200 sessions.
     fusion_alpha: float = 0.78  # weight on lexical; (1 - alpha) on dense
@@ -254,6 +266,33 @@ class DialogueConfig:
     # Defaults are inert (min_spans 0 can never exceed a span count).
     recommend_min_spans: int = 0
     recommend_max_wait: int = 3
+
+    # Two independent gates on the same decision, developed in parallel and
+    # kept together deliberately: this one asks "has the customer said anything
+    # concrete yet?", the one below asks "has the ranker committed?". They read
+    # different signals and `agent.py` applies both, so neither supersedes the
+    # other. Both are inert at their defaults.
+
+    # Recommendation gate -- SEPARATE from the EAR ask gate above, and on a
+    # DIFFERENT SCALE. `ask_max_confidence` (0.82) sits above the entire
+    # observed NQC range [0.011, 0.194], which is why CLAUDE.md records that
+    # gate as never once flipping a decision on the public 200: it is not
+    # broken, it is unreachable. This threshold is the same statistic
+    # calibrated to the range the system actually produces -- do not tune the
+    # two together or reason from one to the other.
+    #
+    # Why hold at all: the evaluator breaks on first hit
+    # (`local_evaluator.py:252`), so an early recommendation permanently locks
+    # in whatever rank it has, and 60% of sub-rank-1 sessions lock in at turn
+    # 1 -- before the customer has disclosed the spans that separate the
+    # target from its imposter. One more turn improves 68% of the sessions
+    # that are losing and changes 98% of the ones already won.
+    #
+    # 0.0 disables the gate entirely (byte-identical to prior behaviour),
+    # which is why this is a threshold rather than a boolean -- rollback is
+    # one config value, not a code-path removal.
+    min_recommend_confidence: float = 0.0
+    recommend_turn_fallback: int = 3
 
     # Expected disclosure per attribute -- *measured*, not guessed. Produced by
     # `python -m tools.measure_attribute_yield` over the 200 public sessions:
