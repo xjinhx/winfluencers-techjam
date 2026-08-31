@@ -280,6 +280,9 @@ shipped configuration. `delta` is what that component is worth: a large
 negative number means removing it hurts, so it is carrying real load; a
 positive number means the system scored slightly *better* without it.
 
+Full table also in `docs/ablations_tuned.md`; regenerate with
+`python -m tools.ablate --config config/tuned.json`.
+
 Read the small rows with the noise floor in mind — one session is 0.5 points of
 HR@10, so treat anything inside roughly ±0.01 as "no measurable effect" rather
 than as a ranking of the minor components. Each row is a single run, not a
@@ -427,7 +430,10 @@ access for final scoring, so there is no package to install and no model to
 download. `requirements.txt` is intentionally empty of packages.
 
 Modules used: `json`, `re`, `math`, `array`, `collections`, `dataclasses`,
-`functools`, `pathlib`, `statistics`, `random`, `argparse`, `unittest`.
+`functools`, `pathlib`, `os`, `typing`, plus `statistics`, `random`,
+`argparse` and `unittest` in the tooling and tests. (`sqlite3` appears once, in
+the organizer's original weak-BM25 baseline, which we keep in the repo for
+comparison — nothing on the agent's turn path uses a database.)
 
 The BM25 inverted indexes, the character-n-gram semantic index, the fusion
 layer, the feature extractor, the linear ranker, and the coordinate-ascent tuner
