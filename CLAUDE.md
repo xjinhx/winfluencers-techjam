@@ -423,6 +423,87 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Ablation table regenerated against the SHIPPED config for the first time.
+Two published conclusions flip; three components still fail to earn their
+place (2026-09-01, per arwenalyssa: "yes regenerate this").** The table in
+README/DEVPOST had always been measured from `Config()` **dataclass
+defaults** (0.7641) because `tools/ablate.py:main()` hard-coded that — so no
+ablation had ever described a tuned build, let alone the current one. Added
+`--config` (default unchanged, so the historic table stays reproducible) plus
+five rows for components that did not exist when the table was written.
+Output: `docs/ablations_tuned.json` / `.md`; the defaults table is preserved
+at `docs/ablations.md`.
+
+| component removed | TechnicalScore | delta | was (0.7641 build) |
+|---|---|---|---|
+| *full system* | 0.9427 | — | — |
+| clarification policy | 0.5535 | **−0.3892** | −0.4473 |
+| popularity priors | 0.8683 | **−0.0744** | −0.0230 |
+| candidate depth 200→20 | 0.9003 | −0.0424 | −0.0318 |
+| **recommendation hold (both gates)** | 0.9091 | **−0.0336** | *new* |
+| **span conjunction (`span_all`)** | 0.9194 | **−0.0234** | *new* |
+| per-field weighting | 0.9300 | **−0.0128** | **+0.0007** |
+| phrase / bigram | 0.9335 | −0.0092 | −0.0139 |
+| constraint scoring | 0.9368 | −0.0060 | −0.0021 |
+| coverage + category focus | 0.9375 | −0.0052 | −0.0076 |
+| dense route | 0.9391 | −0.0036 | −0.0013 |
+| **low-coverage penalties** | 0.9417 | −0.0010 | *new* |
+| + MMR diversity | 0.9427 | +0.0000 | +0.0000 |
+| **+ re-ask disclosed attributes** | 0.9429 | +0.0002 | *new* |
+| **constraint commonness penalty** | 0.9434 | **+0.0007** | *new* |
+| profile personalisation | 0.9438 | +0.0010 | +0.0010 |
+
+**Two cross-checks say the table is trustworthy.** The full-system row
+reproduces **0.9427** (the CLI evaluator's 0.942739), and the
+recommendation-hold row lands at **0.9091** — i.e. 0.909328, the pre-gate
+score measured independently weeks earlier by an entirely different route.
+The re-ask row is **+0.0002**, exactly reproducing the same day's
+`disclosed_ask_decay` sweep. Three independent agreements.
+
+**`per_field_weighting` flipped sign, +0.0007 → −0.0128, and the old reading
+was not wrong.** It was measured before the tuner differentiated the
+per-field weights at all (`w_categories` 0.90→0.70, `w_description`
+0.45→0.80). An ablation of an untuned component measures the component's
+*idea*; an ablation of a tuned one measures the fitted values. **Both
+documents claimed this component "does not earn its place" — that claim is
+now retracted in README and DEVPOST.**
+
+**Popularity priors roughly tripled, −0.0230 → −0.0744, now second-largest.**
+That is the bill for `w_log_rating_number` 0.15 → 0.88. Worth stating
+uncomfortably: the component this project is least willing to defend — it
+exploits how the benchmark was *built*, not how shoppers behave — has become
+**more** load-bearing over time, not less. The README/DEVPOST honesty caveat
+about popularity now applies with more force than when it was written.
+
+**`constraint_commonness_penalty` is now INERT (+0.0007) and is a delete
+candidate.** It was adopted 2026-08-30 with real fold evidence (holdout
++0.0093 at strength 0.30, see its entry below). Nothing about that was
+wrong: the conjunctive injection and `span_all`, both built afterwards,
+address the same boilerplate-dilution failure more directly and left it
+nothing to do. **A superseded component, not a mistaken one — but it is now
+40 lines and a tuned parameter buying nothing measurable.** Not removed this
+session; flagged.
+
+**Three components still fail to earn their place**, and profile
+personalisation is the striking one: **+0.0010 on both builds**, two
+independent measurements 0.18 points of TechnicalScore apart agreeing to four
+decimals. That is no longer plausibly noise. MMR is +0.0000 for the third
+separate time. Neither has been removed.
+
+**Read the small rows as noise, and the table says so.** Only clarification,
+popularity, depth, the hold, and `span_all` clear a plausible noise floor;
+everything from `per-field weighting` down is within ~0.01 and each row is a
+**single run, not fold-validated**. This table ranks the big components and
+should not be used to rank the small ones.
+
+**The conjunctive injection has NO ROW and cannot get one from config** — it
+is unconditional in `agent.py` by the 2026-08-31 "permanent fix" decision, so
+ablating it requires reverting code. Both documents now say that explicitly
+rather than omitting it silently.
+
+**Cost: 16 rows × ~3.5 min = ~57 min.** `Bench` reuses one agent via
+`apply_config`, so there is no per-row index rebuild.
+
 **ADOPTED ON PRODUCT GROUNDS, NOT SCORE: `disclosed_ask_decay: 0.0` — never
 ask about an attribute the customer has already disclosed. Costs −0.0002
 (0.942939 → 0.942739) and was knowingly taken (2026-09-01, per arwenalyssa,

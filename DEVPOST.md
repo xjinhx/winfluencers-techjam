@@ -81,8 +81,8 @@ most of our final score came from.
 ## The findings that made the difference
 
 **1. Clarification is the system, not a refinement to it.** Removing it costs
-−0.4473 TechnicalScore, an order of magnitude more than any other component.
-Our first working build scored 0.3167 because the clarification gate was being
+−0.3892 TechnicalScore on the shipped build — 37 points of HR@10, and more than
+five times any other component. Our first working build scored 0.3167 because the clarification gate was being
 handed the ten returned recommendations instead of the ranked candidate pool, so
 its "is the candidate space still large enough to narrow?" test rejected every
 turn and the agent never asked anything. Browsing sessions stalled with the
@@ -275,30 +275,78 @@ measurement retired it.
 
 ### What each component is worth
 
-Each row disables exactly one thing. **This table is measured against the
-pre-tuning default-weights build (0.7641), not the shipped 0.9429** — it shows
-relative contribution under that build and has not been regenerated since.
+We switched off each component in turn and re-ran all 200 sessions against the
+shipped configuration. `delta` is what that component is worth: a large
+negative number means removing it hurts, so it is carrying real load; a
+positive number means the system scored slightly *better* without it.
 
-| component removed | TechnicalScore | delta |
-|---|---|---|
-| *full system (pre-tuning)* | 0.7641 | — |
-| clarification policy | 0.3167 | **−0.4473** |
-| candidate depth 200 → 20 | 0.7323 | −0.0318 |
-| popularity priors | 0.7410 | −0.0230 |
-| phrase / bigram evidence | 0.7502 | −0.0139 |
-| coverage + category focus | 0.7565 | −0.0076 |
-| constraint scoring | 0.7620 | −0.0021 |
-| semantic route | 0.7628 | −0.0013 |
-| per-field weighting | 0.7648 | +0.0007 |
-| profile personalisation | 0.7650 | +0.0010 |
-| *added:* MMR diversity | 0.7641 | +0.0000 |
+Read the small rows with the noise floor in mind — one session is 0.5 points of
+HR@10, so treat anything inside roughly ±0.01 as "no measurable effect" rather
+than as a ranking of the minor components. Each row is a single run, not a
+fold-validated result.
 
-Two components measurably did **not** earn their place at that point — profile
-personalisation and per-field lexical weighting both scored marginally better
-when removed. Both are inside noise, so it is not a finding in either direction,
-but nothing in our results argued for them and we would rather report that than
-imply otherwise. MMR measured at exactly +0.0000 and is disabled in the shipped
-config.
+| component removed | HR@10 | MRR | MTTC | TechnicalScore | delta |
+|---|---|---|---|---|---|
+| *full system* | 1.000 | 0.9025 | 2.40 | **0.9427** | — |
+| clarification policy | 0.630 | 0.4598 | 5.97 | 0.5535 | **−0.3892** |
+| popularity priors | 0.960 | 0.7556 | 2.92 | 0.8683 | **−0.0744** |
+| candidate depth 200 → 20 | 0.955 | 0.8648 | 2.83 | 0.9003 | **−0.0424** |
+| recommendation hold (both gates) | 1.000 | 0.7561 | 1.89 | 0.9091 | **−0.0336** |
+| span conjunction (`span_all`) | 0.990 | 0.8522 | 2.56 | 0.9194 | **−0.0234** |
+| per-field weighting | 0.990 | 0.8789 | 2.44 | 0.9300 | −0.0128 |
+| phrase / bigram evidence | 0.995 | 0.8841 | 2.46 | 0.9335 | −0.0092 |
+| constraint scoring | 0.995 | 0.8928 | 2.43 | 0.9368 | −0.0060 |
+| coverage + category focus | 1.000 | 0.8780 | 2.29 | 0.9375 | −0.0052 |
+| semantic route | 0.995 | 0.9027 | 2.46 | 0.9391 | −0.0036 |
+| low-coverage penalties | 1.000 | 0.8990 | 2.40 | 0.9417 | −0.0010 |
+| *added:* MMR diversity | 1.000 | 0.9025 | 2.40 | 0.9427 | +0.0000 |
+| *added:* re-ask disclosed attributes | 1.000 | 0.9025 | 2.39 | 0.9429 | +0.0002 |
+| constraint commonness penalty | 1.000 | 0.9058 | 2.42 | 0.9434 | +0.0007 |
+| profile personalisation | 1.000 | 0.9072 | 2.42 | 0.9438 | +0.0010 |
+
+**Clarification dominates everything else by a factor of five.** Removing it
+costs 37 points of HR@10. That is the finding we would keep if we could keep
+only one.
+
+**The recommendation hold row doubles as a check on the table.** Switching both
+gates off lands at 0.9091 — reproducing 0.909328, the pre-gate score we had
+measured independently, by a completely different route, much earlier. The
+shape of the trade is visible in the row: MRR collapses 0.9025 → 0.7561 while
+MTTC *improves* to 1.89. Answering sooner is genuinely faster and genuinely
+worse.
+
+**Two results contradict what we wrote in earlier versions of this document.**
+We are flagging them rather than quietly correcting them, because the earlier
+claims were right for the build they were measured on:
+
+- We said **per-field lexical weighting did not earn its place** (+0.0007 on the
+  pre-tuning build). On the shipped build it is **−0.0128**. That reading was
+  taken before the tuner had differentiated the per-field weights at all.
+- **Popularity priors roughly tripled in importance**, −0.0230 → **−0.0744**,
+  and are now the second-largest component — the bill for tuning
+  `w_log_rating_number` from 0.15 to 0.88. This one deserves stating plainly,
+  because it is the component we are least comfortable defending: the part of
+  the system that exploits a property of how the benchmark was *built* rather
+  than modelling shoppers has become **more** load-bearing over time, not less.
+  Everything in the popularity caveat above applies with more force than when
+  we first wrote it.
+
+**Three components still do not earn their place, and we would rather say so
+than imply otherwise.** Profile personalisation (+0.0010 — the identical figure
+it scored on the pre-tuning build, two independent measurements 0.18 points
+apart agreeing), MMR diversity (+0.0000 for the third separate time, which is
+why it ships disabled), and the constraint commonness penalty (+0.0007). The
+last is a supersession rather than an error: it was adopted with held-out
+evidence to stop boilerplate query terms diluting retrieval, and the
+conjunctive injection and `span_all` we built afterwards address the same
+failure more directly, leaving it nothing to do.
+
+**One component has no row, and we would rather admit that than estimate it.**
+The conjunctive injection is unconditional in the code with no enable flag, so
+it cannot be switched off from configuration — measuring it would mean
+reverting code. Its contribution was measured when it was adopted: HR@10 0.995
+→ 1.000, and the count of targets that never reach the candidate pool at all
+going 1 → 0.
 
 We also learned a methodology lesson worth passing on: we first ran this table
 on an 80-session subset and three readings were wrong, including one component

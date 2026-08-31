@@ -30,7 +30,8 @@ turn after they said "polyester" reads as an agent that is not listening. It
 costs 0.942939 → 0.942739, entirely as one extra turn of MTTC on one session
 (MRR is byte-identical), which is two orders of magnitude under this set's
 ~0.029 standard error. Taken knowingly; rollback is `disclosed_ask_decay: 1.0`.
-The tables below predate it and are all at 0.942939.
+The two-gate table immediately below predates this change and is quoted at
+0.942939; the ablation table further down is measured on the shipped build.
 
 **Read this as in-sample, and read the two gates that got it there separately —
 they were built independently and neither one predicts the other's contribution:**
@@ -117,18 +118,22 @@ constraint-aware feature vector) → decide whether to ask, hold, or recommend.
    turns to spare. A separate, later-added gate governs *when to show a
    recommendation list at all*: because the evaluator scores the first turn a
    session's target appears in the top 10 and then stops, showing a weak list
-   early can lock in a bad rank permanently. The agent now withholds
-   recommending until the customer has disclosed at least one concrete
-   constraint span **and** the ranker's own confidence (Normalized Query
-   Commitment, Shtok et al. 2009) has crossed a measured threshold — whichever
-   comes first, capped at turn 3 so a silent customer is never met with
-   silence forever.
+   early can lock in a bad rank permanently. So the agent shows a list only
+   when **both** of two independent gates pass: the customer has disclosed at
+   least one concrete constraint span, *and* the ranker's own confidence
+   (Normalized Query Commitment, Shtok et al. 2009) has crossed a measured
+   threshold. They read different signals and either can hold a turn the other
+   would release, which is why both ship rather than one superseding the other.
+   Each carries its own turn cap — 4 and 3 respectively — past which it stops
+   holding, so a customer who never discloses anything is not met with silence
+   forever. An uncapped hold would turn a hit into a miss, spending the
+   0.5-weighted term to save the 0.2-weighted one.
 
 ### What we found in the data
 
 **Clarification is the system, not a refinement to it.** Removing it costs
-−0.4473 TechnicalScore, an order of magnitude more than any other component.
-The reason is structural: a browsing session opens with a category and no
+−0.3892 TechnicalScore on the shipped build — 37 points of HR@10, and more than
+five times any other component. The reason is structural: a browsing session opens with a category and no
 constraints, so if the agent never asks, no information arrives, the ranking
 cannot change, and the remaining nine turns re-return the same wrong list. Our
 first working build scored 0.3167 because the clarification gate was handed the
@@ -241,31 +246,86 @@ nothing left to reweight.
 
 ### Component ablations
 
-Each row disables exactly one component, measured against the pre-tuning
-default-weights build (`0.7641`, not the current `0.9429`) — this table shows
-each component's *relative* contribution under that build, not its
-contribution to the current score, and has not been regenerated since
-(`python -m tools.ablate`, table in `docs/ablations.md`).
+**How to read this.** Each row switches off exactly one component and re-runs
+all 200 sessions against the *shipped* configuration. `delta` is what that
+component is worth: a large negative number means removing it hurts, so it is
+carrying real load; a positive number means the system scored slightly *better*
+without it. Regenerate with
+`python -m tools.ablate --config config/tuned.json`.
+
+**Read the magnitudes with the noise floor in mind.** A single run on 200
+sessions cannot resolve small differences — one session is 0.5 points of HR@10.
+Treat anything inside roughly ±0.01 as "no measurable effect" rather than as a
+ranking of the minor components, and note that each row here is one run, not a
+fold-validated result.
 
 | component removed | HR@10 | MRR | MTTC | TechnicalScore | delta |
 |---|---|---|---|---|---|
-| *full system (pre-tuning)* | 0.885 | 0.5535 | 3.23 | 0.7641 | — |
-| clarification policy | 0.380 | 0.1858 | 7.45 | 0.3167 | **−0.4473** |
-| candidate depth 200 → 20 | 0.830 | 0.5689 | 3.67 | 0.7323 | −0.0318 |
-| popularity priors | 0.860 | 0.5371 | 3.50 | 0.7410 | −0.0230 |
-| phrase / bigram evidence | 0.870 | 0.5443 | 3.40 | 0.7502 | −0.0139 |
-| coverage + category focus | 0.880 | 0.5417 | 3.30 | 0.7565 | −0.0076 |
-| constraint scoring | 0.885 | 0.5470 | 3.23 | 0.7620 | −0.0021 |
-| semantic route | 0.890 | 0.5366 | 3.16 | 0.7628 | −0.0013 |
-| per-field weighting | 0.895 | 0.5295 | 3.08 | 0.7648 | +0.0007 |
-| profile personalisation | 0.885 | 0.5575 | 3.23 | 0.7650 | +0.0010 |
-| *added:* MMR diversity | 0.885 | 0.5539 | 3.23 | 0.7641 | +0.0000 |
+| *full system* | 1.000 | 0.9025 | 2.40 | **0.9427** | — |
+| clarification policy | 0.630 | 0.4598 | 5.97 | 0.5535 | **−0.3892** |
+| popularity priors | 0.960 | 0.7556 | 2.92 | 0.8683 | **−0.0744** |
+| candidate depth 200 → 20 | 0.955 | 0.8648 | 2.83 | 0.9003 | **−0.0424** |
+| recommendation hold (both gates) | 1.000 | 0.7561 | 1.89 | 0.9091 | **−0.0336** |
+| span conjunction (`span_all`) | 0.990 | 0.8522 | 2.56 | 0.9194 | **−0.0234** |
+| per-field weighting | 0.990 | 0.8789 | 2.44 | 0.9300 | −0.0128 |
+| phrase / bigram evidence | 0.995 | 0.8841 | 2.46 | 0.9335 | −0.0092 |
+| constraint scoring (Route C) | 0.995 | 0.8928 | 2.43 | 0.9368 | −0.0060 |
+| coverage + category focus | 1.000 | 0.8780 | 2.29 | 0.9375 | −0.0052 |
+| dense route (Route B) | 0.995 | 0.9027 | 2.46 | 0.9391 | −0.0036 |
+| low-coverage penalties | 1.000 | 0.8990 | 2.40 | 0.9417 | −0.0010 |
+| *added:* MMR diversity | 1.000 | 0.9025 | 2.40 | 0.9427 | +0.0000 |
+| *added:* re-ask disclosed attributes | 1.000 | 0.9025 | 2.39 | 0.9429 | +0.0002 |
+| constraint commonness penalty | 1.000 | 0.9058 | 2.42 | 0.9434 | +0.0007 |
+| profile personalisation | 1.000 | 0.9072 | 2.42 | 0.9438 | +0.0010 |
 
-Retrieval depth is the second-largest lever, and the metric split shows why:
-depth 20 *raises* MRR to 0.5689 while dropping HR@10 to 0.830. A shallow pool
-ranks what it contains slightly better and simply lacks the rest — the same
-mechanism the later `per_field_depth` and conjunctive-injection work
-addressed directly, at the current, much higher score.
+**Clarification is still the system.** Removing it costs 37 points of HR@10 and
+more than five times any other component. The mechanism is structural: a
+browsing session opens with a category and nothing else, so if the agent never
+asks, no information ever arrives, the ranking cannot change, and the remaining
+nine turns re-return the same wrong list.
+
+**The recommendation hold lands at 0.9091, which is a useful check on the whole
+table** — that reproduces 0.909328, the pre-gate score measured independently
+by a different route months of work earlier. Note the shape of the trade: MRR
+collapses 0.9025 → 0.7561 while MTTC *improves* to 1.89. Answering sooner is
+genuinely faster and genuinely worse, which is exactly the exchange the gates
+exist to make.
+
+**Two results contradict what earlier versions of this document claimed, and
+the earlier claims were right for the build they were measured on:**
+
+- **Per-field lexical weighting was listed as not earning its place** (+0.0007
+  under the pre-tuning defaults). On the shipped build it is **−0.0128** — one
+  of the larger contributors. The earlier reading was taken before the tuner
+  differentiated the per-field weights at all.
+- **Popularity priors roughly tripled**, −0.0230 → **−0.0744**, and are now the
+  second-largest component. That is the bill for tuning
+  `w_log_rating_number` from 0.15 to 0.88. It deserves saying plainly, because
+  this is the component we are least comfortable defending (see the caveat
+  above): the part of the system that exploits a benchmark artifact rather than
+  modelling shoppers has become *more* load-bearing over time, not less.
+
+**Three components still do not earn their place**, and we would rather report
+that than imply otherwise: profile personalisation (+0.0010, the same figure it
+scored on the pre-tuning build — two independent measurements 0.18 points
+apart agreeing), MMR diversity (+0.0000 for the third time, which is why it
+ships disabled), and the constraint commonness penalty (+0.0007). The last of
+those is a supersession rather than a mistake: it was adopted with fold
+evidence to stop boilerplate query terms diluting retrieval, and the
+conjunctive injection and `span_all` added later address the same failure more
+directly, leaving it with nothing to do.
+
+**One component has no row, deliberately.** The conjunctive exact-substring
+injection is unconditional in `agent.py` with no enable flag, so it cannot be
+switched off from config; measuring it would require reverting code. Its
+contribution was measured at adoption time instead: HR@10 0.995 → 1.000, and
+`target_never_in_pool` 1 → 0.
+
+*The pre-tuning ablation table this section used to carry, measured against the
+0.7641 default-weights build, is preserved at `docs/ablations.md`. It is not
+comparable row-for-row with the table above — a stronger baseline leaves less
+room to fall, which is why clarification reads −0.3892 here against −0.4473
+there.*
 
 ### Grounding in prior work
 
