@@ -47,7 +47,7 @@ export function Storefront({ onAskCopilot }: { onAskCopilot: () => void }) {
               <br />
               sorted for you.
             </h2>
-            <p className="hero-subtitle">Ask the Copilot — we'll narrow 50k pieces down to 10.</p>
+            <p className="hero-subtitle">Ask Buyte — we'll narrow 50k pieces down to 10.</p>
           </div>
         </div>
 

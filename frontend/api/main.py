@@ -1,13 +1,18 @@
 """Thin HTTP wrapper around the real agent, for the hosted demo frontend.
 
 Per PRD_demo_frontend.md: this is a presentation-layer service only. It does
-not modify `shopping_copilot/` or `starter/agent.py` -- it imports the real,
-unmodified submission entry point (`starter.agent.Agent`, which is exactly
-what the competition harness constructs) and exposes two endpoints over it.
+not modify `shopping_copilot/`, `starter/agent.py`, or `evaluator/` -- it
+imports the real, unmodified submission entry point (`starter.agent.Agent`,
+which is exactly what the competition harness constructs) and the real,
+unmodified customer-simulation logic from `evaluator.local_evaluator` (the
+same functions the CLI evaluator itself uses), and exposes them over HTTP.
 
-No agent/ranking/evaluator code lives in this file. The only thing added here
-is catalog lookups to turn a bare `parent_asin` into something a UI can render
-(title, price, rating, store) -- the agent's `respond()` contract returns
+No agent/ranking/evaluator logic is reimplemented here -- `/simulate` calls
+straight into `evaluator.local_evaluator`'s own `initial_message` /
+`customer_reply` / `materialize_hidden_fields`, so this demo can never drift
+from what the real evaluator does. The only thing added here is catalog
+lookups to turn a bare `parent_asin` into something a UI can render (title,
+price, rating, store) -- the agent's `respond()` contract returns
 identifiers, not display data.
 """
 
@@ -16,6 +21,7 @@ from __future__ import annotations
 import os
 import random
 import sys
+import uuid
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -28,6 +34,17 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+from evaluator.local_evaluator import (  # noqa: E402
+    MAX_TURNS,
+    TOP_K,
+    catalog_index,
+    coarse_category,
+    customer_reply,
+    initial_message,
+    load_jsonl,
+    materialize_hidden_fields,
+    normalize_recommendations,
+)
 from starter.agent import Agent  # noqa: E402
 
 CATALOG_PATH = Path(os.environ.get("CATALOG_PATH", str(REPO_ROOT / "data" / "catalog.jsonl")))
@@ -76,7 +93,7 @@ def _ensure_catalog() -> None:
 
 _ensure_catalog()
 
-app = FastAPI(title="Shopping Copilot Demo API")
+app = FastAPI(title="Buyte Demo API")
 
 _frontend_origin = os.environ.get("FRONTEND_ORIGIN", "")
 _allow_origins = [o.strip() for o in _frontend_origin.split(",") if o.strip()] or ["*"]
@@ -96,26 +113,14 @@ app.add_middleware(
 _agent = Agent(catalog_path=str(CATALOG_PATH))
 _lock = Lock()
 
+# Raw catalog rows + category lists, matching what evaluator.local_evaluator
+# itself builds via catalog_index() -- needed by coarse_category() and
+# materialize_hidden_fields() below. This is a second in-memory copy of the
+# catalog alongside the Agent's own parsed Catalog; fine at this dataset size
+# (50k rows) for a demo service.
+_catalog_ids, _categories, _products = catalog_index(str(CATALOG_PATH))
 
-def _load_demo_profiles() -> list[dict[str, Any]]:
-    if not PUBLIC_SET_PATH.is_file():
-        return []
-    import json
-
-    profiles = []
-    with PUBLIC_SET_PATH.open(encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            profile = row.get("user_profile")
-            if profile:
-                profiles.append({"sample_id": row.get("sample_id", ""), "user_profile": profile})
-    return profiles
-
-
-_demo_profiles = _load_demo_profiles()
+_demo_samples: list[dict[str, Any]] = load_jsonl(PUBLIC_SET_PATH) if PUBLIC_SET_PATH.is_file() else []
 
 
 class ResetRequest(BaseModel):
@@ -159,10 +164,109 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/demo-profile")
-def demo_profile() -> dict[str, Any]:
-    if not _demo_profiles:
+def demo_profile(dev: bool = False) -> dict[str, Any]:
+    if not _demo_samples:
         raise HTTPException(status_code=503, detail="No public_set.jsonl available on this server.")
-    return random.choice(_demo_profiles)
+    picked = random.choice(_demo_samples)
+    if not dev:
+        return {"sample_id": picked["sample_id"], "user_profile": picked["user_profile"]}
+    ground_truth = picked.get("ground_truth")
+    return {
+        "sample_id": picked["sample_id"],
+        "user_profile": picked["user_profile"],
+        "ground_truth": _enrich(ground_truth["parent_asin"]) if ground_truth else None,
+    }
+
+
+def _run_simulation(sample: dict[str, Any]) -> dict[str, Any]:
+    """Replay one public-set sample exactly the way the CLI evaluator does.
+
+    Drives the real Agent against evaluator.local_evaluator's real customer
+    simulator (initial_message / customer_reply / the intent_override
+    behaviour), turn by turn, and returns the full transcript plus the
+    hit/miss verdict -- the same mechanics as evaluate()'s per-sample loop
+    and tools/demo.py's run_session(), just captured as data instead of
+    printed or scored in aggregate.
+    """
+    target = str(sample["ground_truth"]["parent_asin"])
+    card, behaviour = materialize_hidden_fields(sample, _products)
+    effective = {**sample, "intent_card": card, "behavior": behaviour}
+
+    session_id = f"sim_{uuid.uuid4().hex}"
+    with _lock:
+        _agent.reset(session_id, sample["user_profile"])
+
+    disclosed: set[str] = set()
+    boundary_used = False
+    override_applied = sample["scenario_type"] != "intent_override"
+    message = initial_message(effective, coarse_category(_categories.get(target, [])), disclosed)
+
+    turns: list[dict[str, Any]] = []
+    hit_turn: int | None = None
+    best_rank: int | None = None
+
+    for turn in range(1, MAX_TURNS + 1):
+        with _lock:
+            response = _agent.respond(session_id, message, turn, TOP_K)
+        ranked = normalize_recommendations(response.get("recommendations"), _catalog_ids)
+        rank = ranked.index(target) + 1 if target in ranked else None
+
+        turns.append(
+            {
+                "turn": turn,
+                "customer_message": message,
+                "agent_message": response.get("message", ""),
+                "ask_attribute": response.get("ask_attribute"),
+                "recommendations": [_enrich(asin) for asin in ranked],
+                "target_rank": rank if override_applied else None,
+            }
+        )
+
+        if rank is not None and override_applied:
+            hit_turn = turn
+            best_rank = rank
+            break
+        if turn == MAX_TURNS:
+            break
+
+        override = effective.get("behavior", {}).get("override") or {}
+        if not override_applied and turn + 1 == int(override.get("turn", 3)):
+            override_applied = True
+            new_value = str(override.get("new_value", ""))
+            if new_value:
+                disclosed.add(new_value)
+            message = str(override.get("message", "Actually, please ignore my earlier preference."))
+        else:
+            message, boundary_used = customer_reply(
+                effective, response.get("ask_attribute"), disclosed, boundary_used
+            )
+
+    return {
+        "sample_id": sample["sample_id"],
+        "scenario_type": sample["scenario_type"],
+        "difficulty_bucket": sample.get("difficulty_bucket"),
+        "user_profile_summary": sample.get("user_profile", {}).get("summary", ""),
+        "target": _enrich(target),
+        "hit": hit_turn is not None,
+        "first_hit_turn": hit_turn,
+        "best_rank": best_rank,
+        "reciprocal_rank": 0.0 if best_rank is None else round(1.0 / best_rank, 6),
+        "turns": turns,
+    }
+
+
+@app.post("/simulate")
+def simulate(sample_id: str | None = None) -> dict[str, Any]:
+    if not _demo_samples:
+        raise HTTPException(status_code=503, detail="No public_set.jsonl available on this server.")
+    if sample_id:
+        matches = [s for s in _demo_samples if s.get("sample_id") == sample_id]
+        if not matches:
+            raise HTTPException(status_code=404, detail=f"No sample with sample_id={sample_id!r}")
+        sample = matches[0]
+    else:
+        sample = random.choice(_demo_samples)
+    return _run_simulation(sample)
 
 
 @app.post("/reset")

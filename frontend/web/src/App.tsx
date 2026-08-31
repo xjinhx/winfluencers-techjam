@@ -8,12 +8,14 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("storefront");
 
   return (
-    <div className="phone-frame">
-      {screen === "storefront" ? (
-        <Storefront onAskCopilot={() => setScreen("chat")} />
-      ) : (
-        <Chat onBack={() => setScreen("storefront")} />
-      )}
+    <div className="app-shell">
+      <div className="phone-frame">
+        {screen === "storefront" ? (
+          <Storefront onAskCopilot={() => setScreen("chat")} />
+        ) : (
+          <Chat onBack={() => setScreen("storefront")} />
+        )}
+      </div>
     </div>
   );
 }

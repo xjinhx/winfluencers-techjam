@@ -2,6 +2,7 @@ import backIcon from "../assets/icons/back.svg";
 import avatarMark from "../assets/icons/avatar-mark.svg";
 import liveDot from "../assets/icons/live-dot.svg";
 import { MoreIcon } from "./NavIcons";
+import { MethodologyNotes } from "./MethodologyNotes";
 import "./ChatHeader.css";
 
 export function ChatHeader({
@@ -20,11 +21,11 @@ export function ChatHeader({
       <button type="button" className="icon-button" onClick={onBack} aria-label="Back">
         <img src={backIcon} alt="" width={22} height={22} />
       </button>
-      <div className="chat-avatar">
+      <div className="chat-avatar" aria-label="BuyteAI" title="BuyteAI">
         <img src={avatarMark} alt="" width={18} height={18} />
       </div>
       <div className="chat-header-text">
-        <span className="chat-title">Shopping Copilot</span>
+        <span className="chat-title">Buyte</span>
         <div className="chat-status">
           <img src={liveDot} alt="" width={6} height={6} style={{ opacity: ended ? 0.4 : 1 }} />
           <span>
@@ -32,6 +33,7 @@ export function ChatHeader({
           </span>
         </div>
       </div>
+      <MethodologyNotes />
       <MoreIcon className="more-icon" />
     </div>
   );

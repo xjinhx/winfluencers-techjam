@@ -14,7 +14,7 @@ export function UserBubble({ text }: { text: string }) {
 export function AgentBubble({ text }: { text: string }) {
   return (
     <div className="bubble-row bubble-row-agent">
-      <div className="bubble-avatar-small">
+      <div className="bubble-avatar-small" aria-label="BuyteAI" title="BuyteAI">
         <img src={avatarMark} alt="" width={14} height={14} />
       </div>
       <div className="bubble bubble-agent">

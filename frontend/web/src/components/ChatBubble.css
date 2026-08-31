@@ -31,6 +31,17 @@
   line-height: 1.4;
 }
 
+/* Above the phone breakpoint: bubbles stretch with the wider screen
+   instead of sitting fixed-width in a sea of empty space. Capped so a
+   single line of text doesn't turn into an absurdly wide strip. */
+@media (min-width: 640px) {
+  .bubble {
+    max-width: min(70%, 640px);
+    padding: 14px 18px;
+    font-size: 15px;
+  }
+}
+
 .bubble p {
   margin: 0;
 }

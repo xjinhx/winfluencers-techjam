@@ -1,140 +1,114 @@
 import { useEffect, useRef, useState } from "react";
 import { StatusBar } from "../components/StatusBar";
 import { ChatHeader } from "../components/ChatHeader";
+import { SessionBar } from "../components/SessionBar";
+import { SessionVerdict } from "../components/SessionVerdict";
 import { UserBubble, AgentBubble } from "../components/ChatBubble";
-import { QuickReplies } from "../components/QuickReplies";
 import { RecommendationList } from "../components/RecommendationList";
-import { InputBar } from "../components/InputBar";
-import { fetchDemoProfile, resetSession, respond } from "../lib/api";
-import { quickRepliesFor } from "../lib/presentation";
-import type { ChatTurn } from "../types";
+import { RunBar } from "../components/RunBar";
+import type { RunStatus } from "../components/RunBar";
+import { simulate } from "../lib/api";
+import type { SimulationResult, SimulationTurn } from "../types";
 import "./Chat.css";
 
 const TURN_LIMIT = 10;
-
-const FALLBACK_PROFILE = {
-  average_prior_rating: 4.5,
-  preference_tags: ["fit", "comfort", "style"],
-  purchase_frequency: "3-4 prior purchases",
-  rating_style: "usually positive",
-  summary: "Prior purchases emphasize fit, comfort, style.",
-};
-
-function newId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+const FIRST_TURN_DELAY_MS = 200;
+const REVEAL_DELAY_MS = 900;
 
 export function Chat({ onBack }: { onBack: () => void }) {
-  const [turns, setTurns] = useState<ChatTurn[]>([
-    {
-      id: newId(),
-      role: "agent",
-      text: "Hi! Tell me what you're shopping for and I'll help you narrow it down.",
-    },
-  ]);
-  const [turn, setTurn] = useState(0);
-  const [sessionReady, setSessionReady] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<RunStatus>("idle");
+  const [result, setResult] = useState<SimulationResult | null>(null);
+  const [visibleTurns, setVisibleTurns] = useState<SimulationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const sessionIdRef = useRef(newId());
-  const disclosedRef = useRef<string[]>([]);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      let profile: Record<string, unknown> = FALLBACK_PROFILE;
-      try {
-        const demo = await fetchDemoProfile();
-        profile = demo.user_profile;
-      } catch {
-        // API not reachable yet -- fall back to a representative profile so
-        // the thread still opens; /reset below will surface the real error.
-      }
-      try {
-        await resetSession(sessionIdRef.current, profile);
-        if (!cancelled) setSessionReady(true);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not reach the agent API.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const disclosedRef = useRef<string[]>([]);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [turns, busy]);
+  }, [visibleTurns, status]);
 
-  const ended = turn >= TURN_LIMIT;
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
-  async function send(text: string) {
-    if (busy || ended || !sessionReady) return;
-    const nextTurn = turn + 1;
-    disclosedRef.current.push(...text.toLowerCase().split(/\s+/).filter(Boolean));
+  function revealNext(turns: SimulationTurn[], index: number) {
+    if (index >= turns.length) {
+      setStatus("done");
+      return;
+    }
+    timerRef.current = setTimeout(
+      () => {
+        const turn = turns[index];
+        disclosedRef.current.push(...turn.customer_message.toLowerCase().split(/\s+/).filter(Boolean));
+        setVisibleTurns((prev) => [...prev, turn]);
+        revealNext(turns, index + 1);
+      },
+      index === 0 ? FIRST_TURN_DELAY_MS : REVEAL_DELAY_MS,
+    );
+  }
 
-    setTurns((prev) => [...prev, { id: newId(), role: "user", text }]);
-    setBusy(true);
+  async function runSession() {
+    if (status === "running") return;
+    setStatus("running");
     setError(null);
-
+    setResult(null);
+    setVisibleTurns([]);
+    disclosedRef.current = [];
     try {
-      const result = await respond(sessionIdRef.current, text, nextTurn, 10);
-      setTurn(nextTurn);
-      setTurns((prev) => [
-        ...prev,
-        {
-          id: newId(),
-          role: "agent",
-          text: result.message,
-          quickReplies: quickRepliesFor(result.ask_attribute),
-          recommendations: result.recommendations,
-        },
-      ]);
+      const data = await simulate();
+      setResult(data);
+      revealNext(data.turns, 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The agent didn't respond. Please try again.");
-    } finally {
-      setBusy(false);
+      setError(err instanceof Error ? err.message : "Could not reach the agent API.");
+      setStatus("idle");
     }
   }
+
+  const waitingOnNextTurn = status === "running" && (!result || visibleTurns.length < result.turns.length);
 
   return (
     <div className="chat-screen">
       <StatusBar />
-      <ChatHeader turn={turn} turnLimit={TURN_LIMIT} ended={ended} onBack={onBack} />
+      <ChatHeader turn={visibleTurns.length} turnLimit={TURN_LIMIT} ended={status === "done"} onBack={onBack} />
+      {result ? <SessionBar result={result} /> : null}
 
       <div className="chat-thread">
-        {turns.map((t) =>
-          t.role === "user" ? (
-            <UserBubble key={t.id} text={t.text} />
-          ) : (
-            <div key={t.id} className="agent-turn">
-              <AgentBubble text={t.text} />
-              {t.quickReplies && t.quickReplies.length > 0 ? (
-                <QuickReplies replies={t.quickReplies} disabled={busy || ended} onPick={send} />
-              ) : null}
-              {t.recommendations && t.recommendations.length > 0 ? (
-                <RecommendationList products={t.recommendations} disclosedTerms={disclosedRef.current} />
-              ) : null}
-            </div>
-          ),
-        )}
-        {busy ? (
+        {status === "idle" && visibleTurns.length === 0 ? (
+          <div className="agent-turn">
+            <AgentBubble text="Tap the button below to watch BuyteAI play a real evaluator session: a simulated customer, the unmodified agent, and a hit/miss verdict at the end. You don't type anything -- just watch." />
+          </div>
+        ) : null}
+
+        {visibleTurns.map((t) => (
+          <div key={t.turn} className="agent-turn">
+            <UserBubble text={t.customer_message} />
+            <AgentBubble text={t.agent_message} />
+            {t.recommendations.length > 0 ? (
+              <RecommendationList
+                products={t.recommendations}
+                disclosedTerms={disclosedRef.current}
+                targetAsin={result?.target.parent_asin ?? null}
+              />
+            ) : null}
+          </div>
+        ))}
+
+        {waitingOnNextTurn ? (
           <div className="agent-turn">
             <AgentBubble text="…" />
           </div>
         ) : null}
+
+        {status === "done" && result ? <SessionVerdict result={result} /> : null}
         {error ? <p className="chat-error">{error}</p> : null}
         <div ref={threadEndRef} />
       </div>
 
-      <InputBar
-        disabled={busy || ended || !sessionReady}
-        placeholder={ended ? "Session ended" : "Message the Copilot…"}
-        onSend={send}
-      />
+      <RunBar status={status} onRun={runSession} />
     </div>
   );
 }
