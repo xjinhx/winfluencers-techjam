@@ -40,14 +40,16 @@ export function Storefront({ onAskCopilot }: { onAskCopilot: () => void }) {
           <div className="hero-feature-inner">
             <div className="hero-badge">
               <img src={badgeDot} alt="" width={6} height={6} />
-              <span>COPILOT PICKS · UPDATED TODAY</span>
+              <span>BUYTE PICKS · UPDATED TODAY</span>
             </div>
-            <h2 className="hero-title">
-              Sweater weather,
-              <br />
-              sorted for you.
-            </h2>
-            <p className="hero-subtitle">Ask Buyte — we'll narrow 50k pieces down to 10.</p>
+            <div className="hero-copy">
+              <h2 className="hero-title">
+                Sweater weather,
+                <br />
+                sorted for you.
+              </h2>
+              <p className="hero-subtitle">Ask Buyte — we'll narrow 50k pieces down to 10.</p>
+            </div>
           </div>
         </div>
 

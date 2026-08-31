@@ -105,15 +105,17 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   padding: 22px;
 }
 
+/* The badge is pinned at the top of the card, independent of the title's
+   vertical centering below -- it does not move when the copy grows. */
 .hero-badge {
   display: flex;
   align-items: center;
   gap: 6px;
   align-self: flex-start;
+  flex-shrink: 0;
   padding: 4px 10px 4px 8px;
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.18);
@@ -125,6 +127,17 @@
   font-size: 10px;
   letter-spacing: 0.6px;
   color: var(--color-text-on-dark-primary);
+}
+
+/* Fills the remaining height under the badge and centers the title/
+   subtitle within it. */
+.hero-copy {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
 }
 
 .hero-title {
@@ -144,6 +157,33 @@
   line-height: 1.4;
   color: var(--color-text-on-dark-secondary);
   max-width: 300px;
+}
+
+/* Above the phone breakpoint: the hero card grows taller and the title
+   scales up sharply so a much wider card doesn't read as a thin strip of
+   text on a large empty field. */
+@media (min-width: 640px) {
+  .hero-feature {
+    height: 340px;
+  }
+
+  .hero-feature-inner {
+    padding: 40px 44px;
+  }
+
+  .hero-copy {
+    gap: 18px;
+  }
+
+  .hero-title {
+    font-size: 64px;
+    max-width: 680px;
+  }
+
+  .hero-subtitle {
+    font-size: 18px;
+    max-width: 520px;
+  }
 }
 
 .section-heading {
