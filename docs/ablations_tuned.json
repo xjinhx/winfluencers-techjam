@@ -1,0 +1,149 @@
+{
+  "sample_count": 200,
+  "rows": [
+    {
+      "technical_score": 0.942739,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.902464,
+      "mttc": 2.4,
+      "efficiency": 0.86,
+      "delta": 0.0,
+      "component": "full system"
+    },
+    {
+      "technical_score": 0.939114,
+      "hit_rate_at_10": 0.995,
+      "mrr": 0.902714,
+      "mttc": 2.46,
+      "efficiency": 0.854,
+      "delta": -0.003625,
+      "component": "- dense route (Route B)"
+    },
+    {
+      "technical_score": 0.933517,
+      "hit_rate_at_10": 0.995,
+      "mrr": 0.884056,
+      "mttc": 2.46,
+      "efficiency": 0.854,
+      "delta": -0.009222,
+      "component": "- phrase / bigram evidence"
+    },
+    {
+      "technical_score": 0.868291,
+      "hit_rate_at_10": 0.96,
+      "mrr": 0.755637,
+      "mttc": 2.92,
+      "efficiency": 0.808,
+      "delta": -0.074448,
+      "component": "- popularity priors"
+    },
+    {
+      "technical_score": 0.936752,
+      "hit_rate_at_10": 0.995,
+      "mrr": 0.892839,
+      "mttc": 2.43,
+      "efficiency": 0.857,
+      "delta": -0.005987,
+      "component": "- constraint scoring (Route C)"
+    },
+    {
+      "technical_score": 0.553542,
+      "hit_rate_at_10": 0.63,
+      "mrr": 0.459806,
+      "mttc": 5.97,
+      "efficiency": 0.503,
+      "delta": -0.389197,
+      "component": "- clarification policy"
+    },
+    {
+      "technical_score": 0.9375,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.878,
+      "mttc": 2.295,
+      "efficiency": 0.8705,
+      "delta": -0.005239,
+      "component": "- coverage + category focus"
+    },
+    {
+      "technical_score": 0.943754,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.907179,
+      "mttc": 2.42,
+      "efficiency": 0.858,
+      "delta": 0.001015,
+      "component": "- profile personalisation"
+    },
+    {
+      "technical_score": 0.929981,
+      "hit_rate_at_10": 0.99,
+      "mrr": 0.878937,
+      "mttc": 2.435,
+      "efficiency": 0.8565,
+      "delta": -0.012758,
+      "component": "- per-field weighting"
+    },
+    {
+      "technical_score": 0.900343,
+      "hit_rate_at_10": 0.955,
+      "mrr": 0.86481,
+      "mttc": 2.83,
+      "efficiency": 0.817,
+      "delta": -0.042396,
+      "component": "candidate depth 200 -> 20"
+    },
+    {
+      "technical_score": 0.942739,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.902464,
+      "mttc": 2.4,
+      "efficiency": 0.86,
+      "delta": 0.0,
+      "component": "+ MMR diversity (browsing)"
+    },
+    {
+      "technical_score": 0.909129,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.756095,
+      "mttc": 1.885,
+      "efficiency": 0.9115,
+      "delta": -0.03361,
+      "component": "- recommendation hold (both gates)"
+    },
+    {
+      "technical_score": 0.919352,
+      "hit_rate_at_10": 0.99,
+      "mrr": 0.852173,
+      "mttc": 2.565,
+      "efficiency": 0.8435,
+      "delta": -0.023387,
+      "component": "- span conjunction (span_all)"
+    },
+    {
+      "technical_score": 0.943439,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.905798,
+      "mttc": 2.415,
+      "efficiency": 0.8585,
+      "delta": 0.0007,
+      "component": "- constraint commonness penalty"
+    },
+    {
+      "technical_score": 0.941689,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.898964,
+      "mttc": 2.4,
+      "efficiency": 0.86,
+      "delta": -0.00105,
+      "component": "- low-coverage penalties"
+    },
+    {
+      "technical_score": 0.942939,
+      "hit_rate_at_10": 1.0,
+      "mrr": 0.902464,
+      "mttc": 2.39,
+      "efficiency": 0.861,
+      "delta": 0.0002,
+      "component": "+ re-ask disclosed attributes"
+    }
+  ]
+}
