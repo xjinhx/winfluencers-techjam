@@ -84,8 +84,16 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.908578`, HR@10 = 1.000 — every public
-session hits.** Measured 2026-08-31 on the `mega-fix` working tree (`46a6294`
+**Live score: `TechnicalScore = 0.928002`, HR@10 = 1.000 — every public
+session hits.** Measured 2026-08-31 by running the committed
+`config/tuned.json` through the unmodified CLI evaluator on all 200 public
+sessions, with `recommend_min_spans: 1` adopted (top "What was found" entry):
+0.909328 → **0.928002**, MRR 0.756095 → 0.833673, MTTC 1.875 → 2.105, hit rate
+unchanged at 1.000. 49/49 tests pass.
+
+*The paragraph below records the prior measurement chain and is kept for the
+lineage; 0.908578 and 0.909328 are earlier steps, not the live number.*
+Measured 2026-08-31 on the `mega-fix` working tree (`46a6294`
 plus the conjunctive-injection change, uncommitted at time of writing) by
 running the committed `config/tuned.json` through the unmodified CLI
 evaluator on all 200 public sessions. The injection is **always-on in code**
@@ -313,6 +321,68 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**Evidence-gated recommendation withholding: 0.909328 → 0.928002 (+0.018674),
+HR@10 held at 1.000 (2026-08-31).** The disclosure-timing lever this file
+recorded as *"not yet run; the prior rejection stands until it is"* — now run.
+`config/tuned.json` gains `recommend_min_spans: 1`, `recommend_max_wait: 4`.
+
+**Mechanism.** `local_evaluator` breaks the session loop the first turn the
+target appears in the returned top ten, so **that rank is final**. D2
+("recommend on ask-turns") is right for HR and MTTC and wrong for MRR: a weak
+early list does not merely miss a better rank later, it forecloses it. On the
+public set **45 of the 75 sub-rank-1 sessions locked in on turn 1**, carrying
+15.5 of a possible 45 reciprocal rank. Replaying those past their hit turn,
+every one reached rank 1 by turn 2 or 3 — the better rank was sitting there
+unclaimed. The exchange rate favours waiting **7.5×**: one turn of delay costs
+`0.2 × 0.1 / 200 = 0.0001`, one rank-2 → rank-1 pays `0.3 × 0.5 / 200 =
+0.00075`.
+
+**Why gated on evidence rather than turn number.** Measured at turn 1, split by
+what the customer has actually disclosed: with **one** constraint span the
+target is already at rank 1 in **57 of 110** sessions (52%); with **none** it is
+**13 of 90** (14%). A 3.7× separation, observable without labels and with no
+fitted threshold — `1` is simply "the customer has said something concrete",
+set on principle, not swept. The blunt `recommend_min_turn = 3` silences all
+200 sessions including the 70 already holding the target at rank 1: pure MTTC
+cost for no rank gain.
+
+**Measured.** Fold A / fold B (`stratified_halves`, seed 7) / full 200:
+
+| config | fold A | fold B | full 200 | HR@10 | MTTC |
+|---|---|---|---|---|---|
+| baseline | 0.902707 | 0.915950 | 0.909328 | 1.000 | 1.875 |
+| **`spans ≥ 1` (adopted)** | 0.929679 | **0.926325** | **0.928002** | **1.000** | 2.105 |
+| `min_turn = 3` (rejected) | 0.932829 | 0.935200 | 0.934014 | **0.995** | 3.150 |
+| `spans ≥ 3` (rejected) | 0.933778 | 0.929500 | 0.931639 | **0.995** | 2.955 |
+
+Rank-1 sessions **125 → 147**; 26 improved, 1 regressed (`public_0140`, rank 1
+turn 1 → rank 3 turn 2 — already correct and delayed anyway, the residual waste
+the gate does not catch). Effect is confined to the scenarios whose openers
+disclose nothing, which is the strongest generalisation evidence here: buying
+**0.7961 → 0.7961** and intent_override **0.8806 → 0.8806**, both untouched,
+against browsing **0.6833 → 0.8485** and boundary **0.6450 → 0.8750**.
+
+**Why the two higher-scoring variants were rejected.** Both cost the perfect
+hit rate — `public_0020` (rank 6 at turn 2, gone by turn 3) becomes a miss
+under either. HR carries the 0.5 weight, the 0.006 gap to `min_turn = 3` is
+smaller than the fold-A/fold-B disagreement this set routinely shows, and on
+800 unseen sessions the same ~0.5% rate implies 4–8 outright misses.
+`min_turn = 3` also silences every session for two turns — legal under the
+contract, but it optimises the metric against the product.
+
+**Caveats, stated because they weaken the result.** (1) `spans ≥ 3` won fold A
+at 0.933778 and fell to 0.929500 held out, while `min_turn = 3` rose — the
+swept threshold did not survive and the mechanism-justified one did; treat any
+fold-A-only win on this set accordingly. (2) Fold B was looked at **four
+times** across this work, so it is no longer a pristine holdout. (3)
+`recommend_max_wait` is not a real parameter: 3 and 4 gave byte-identical
+results at every threshold, so the cap never fires on this set — it exists so a
+customer who discloses nothing is not met with silence forever. (4)
+`recommend_min_turn` and `recommend_min_confidence` also ship, both inert; the
+confidence gate is **unusable as scaled** — NQC is `std(top-10)/|top|`, sits far
+below 0.2 in practice, and gating at 0.20 collapsed the agent to HR 0.010. The
+same scale bug is likely latent in `ask_max_confidence = 0.82`.
 
 **Synthetic span normalisation: +0.00075 alone, +0.010 on the ceiling
 (2026-08-31).** Named for the cause, not the colour: `intent_card` does not

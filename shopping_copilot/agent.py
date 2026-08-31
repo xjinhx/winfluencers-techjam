@@ -237,9 +237,28 @@ class Agent:
         if self._trace is not None:
             self._log(state, ctx, candidates, turn)
 
+        # Withholding a list the ranker is not committed to. The first turn the
+        # target appears in the top ten ends the session, so a weak early list
+        # locks in its rank permanently; staying silent keeps the better rank a
+        # later turn would have produced reachable. Defaults make both gates
+        # inert, so this is a no-op until someone sets them.
+        dialogue = self.config.dialogue
+        # `spans` is the disclosure count already computed for the injection
+        # above -- the same evidence, read twice for two different decisions.
+        starved = (
+            len(spans) < dialogue.recommend_min_spans
+            and turn < dialogue.recommend_max_wait
+        )
+        withhold = turn < dialogue.recommend_min_turn or starved or (
+            dialogue.recommend_min_confidence > 0.0
+            and self.clarifier.confidence([s for _, s in ranked])
+            < dialogue.recommend_min_confidence
+        )
         recommendations = (
-            [{"parent_asin": asin} for asin in ordered]
-            if (clarification.attribute is None or self.config.dialogue.recommend_on_ask_turns)
+            []
+            if withhold
+            else [{"parent_asin": asin} for asin in ordered]
+            if (clarification.attribute is None or dialogue.recommend_on_ask_turns)
             else []
         )
         return {
