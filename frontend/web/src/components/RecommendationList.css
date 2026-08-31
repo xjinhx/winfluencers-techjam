@@ -6,6 +6,17 @@
   padding-left: 36px;
 }
 
+/* Above the phone breakpoint: lay cards out in a grid instead of one
+   narrow stacked column, so the recommendation list actually uses the
+   wider screen rather than stretching a single card edge to edge. */
+@media (min-width: 640px) {
+  .recommendation-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    padding-left: 44px;
+  }
+}
+
 .recommendation-item {
   display: flex;
   flex-direction: column;

@@ -32,9 +32,12 @@ img {
   display: block;
 }
 
-/* Fullscreen at every width: the app fills the viewport, no floating
-   mockup, no frame chrome, no side panel. Mobile-first: below the first
-   breakpoint the thread runs edge to edge like a native app. */
+/* Fullscreen at every width, full stop -- the app fills the viewport, no
+   floating mockup, no frame chrome, no capped column. The compact
+   "phone-ish" sizing (bubble widths, single-column recommendations) is
+   scoped to the phone breakpoint inside each component's own stylesheet;
+   above it, that content stretches to use the wider screen instead of
+   sitting in a narrow column with empty space on either side. */
 .app-shell {
   height: 100vh;
   display: flex;
@@ -50,18 +53,6 @@ img {
   position: relative;
   display: flex;
   flex-direction: column;
-}
-
-/* Tablet and up: cap the column so a single conversation thread doesn't
-   stretch edge to edge on a wide screen. Still full viewport height, still
-   no mockup chrome -- just a centered, bounded column with a hairline edge,
-   the same shape any responsive chat app settles into on a laptop. */
-@media (min-width: 640px) {
-  .phone-frame {
-    max-width: 480px;
-    border-left: 1px solid var(--color-stroke-on-dark);
-    border-right: 1px solid var(--color-stroke-on-dark);
-  }
 }
 
 ::-webkit-scrollbar {

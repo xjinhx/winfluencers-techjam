@@ -7,6 +7,14 @@
   margin-left: 36px;
 }
 
+@media (min-width: 640px) {
+  .session-verdict {
+    max-width: min(70%, 640px);
+    margin-left: 44px;
+    padding: 18px 20px;
+  }
+}
+
 .session-verdict-hit {
   background: rgba(61, 219, 217, 0.14);
   border: 1px solid var(--color-accent-teal);
