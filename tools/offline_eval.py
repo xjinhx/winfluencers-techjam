@@ -150,20 +150,41 @@ def rank_turn(rows: list[dict], score_fn) -> tuple[list[str], list[float]]:
     return [asin for _, asin in scored], [score for score, _ in scored]
 
 
-def recommendations_withheld(scores: list[float], turn: int, config: Config | None) -> bool:
+def recommendations_withheld(
+    scores: list[float],
+    turn: int,
+    config: Config | None,
+    spans: int | None = None,
+) -> bool:
     """Whether the live agent would have suppressed this turn's list.
 
-    Mirrors the gate in `Agent._respond` exactly, on the same `nqc` function
-    and the same input -- the full ranked pool's scores, of which `nqc` reads
-    the top ten. `config=None` means no gate, which is what every caller that
-    predates it gets.
+    Mirrors *both* gates in `Agent._respond`, as the same OR. The NQC gate runs
+    on the same `nqc` function and the same input -- the full ranked pool's
+    scores, of which `nqc` reads the top ten. The disclosure gate needs the
+    turn's span count, which `Agent._log` writes into every trace row.
+
+    `config=None` means no gate, which is what every caller that predates it
+    gets. `spans=None` means a trace written before that field existed: the
+    disclosure gate is then skipped rather than guessed at, and `main` warns
+    when that combination could actually change a verdict.
+
+    Every suppressor in `Agent._respond` is mirrored here. That is only true
+    because `recommend_on_ask_turns` was deleted 2026-08-31: it keyed off the
+    clarification decision, which a trace does not record, so while it existed
+    this replay could be made silently optimistic by one config edit. Do not
+    reintroduce a suppressor that reads something the trace does not carry.
     """
     if config is None:
         return False
     dialogue = config.dialogue
-    if dialogue.min_recommend_confidence <= 0.0:
-        return False
-    return (turn < dialogue.recommend_turn_fallback
+    if turn < dialogue.recommend_min_turn:
+        return True
+    if (spans is not None
+            and spans < dialogue.recommend_min_spans
+            and turn < dialogue.recommend_max_wait):
+        return True
+    return (dialogue.min_recommend_confidence > 0.0
+            and turn < dialogue.recommend_turn_fallback
             and nqc(scores) < dialogue.min_recommend_confidence)
 
 
@@ -188,9 +209,12 @@ def replay_session(
     hit_turn: int | None = None
 
     for turn in sorted(turns):
-        ranked, scores = rank_turn(turns[turn], score_fn)
+        rows = turns[turn]
+        ranked, scores = rank_turn(rows, score_fn)
         ordered = ranked[:TOP_K]
-        withheld = recommendations_withheld(scores, turn, config)
+        withheld = recommendations_withheld(
+            scores, turn, config, rows[0].get("spans") if rows else None
+        )
         if not withheld and override_applied and target in ordered:
             best_rank = ordered.index(target) + 1
             hit_turn = turn
@@ -274,6 +298,17 @@ def main() -> None:
     joined = join_by_order(order, labels)
     config = Config.load(args.config)
     scorer = ReplayScorer(config)
+
+    # A trace predating the `spans` field cannot reproduce the disclosure gate,
+    # and the replay would then find hits on turns the live agent stayed silent
+    # for -- the exact failure this tool exists to catch. Say so loudly rather
+    # than reporting a clean-looking disagreement count.
+    if config.dialogue.recommend_min_spans > 0 and not any(
+        "spans" in row for rows in groups.values() for row in rows
+    ):
+        print("WARNING: recommend_min_spans is on but the trace has no `spans` "
+              "field -- regenerate the trace, or this replay is optimistic.")
+
     result = offline_metrics(groups, joined, scorer, config)
 
     pool = target_in_pool(groups, joined)

@@ -903,6 +903,11 @@ customer who discloses nothing is not met with silence forever. (4)
 confidence gate is **unusable as scaled** — NQC is `std(top-10)/|top|`, sits far
 below 0.2 in practice, and gating at 0.20 collapsed the agent to HR 0.010. The
 same scale bug is likely latent in `ask_max_confidence = 0.82`.
+**Update 2026-08-31: `recommend_min_confidence` has been deleted** — the
+`investigation` merge brought a correctly-scaled, turn-capped NQC threshold
+(`min_recommend_confidence`) with a near-identical name, and two dials on one
+statistic is a trap. This caveat's diagnosis was right and is what justified
+removing it; see the cleanup entry at the top.
 
 **Synthetic span normalisation: +0.00075 alone, +0.010 on the ceiling
 (2026-08-31).** Named for the cause, not the colour: `intent_card` does not

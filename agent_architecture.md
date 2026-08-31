@@ -539,11 +539,11 @@ exist here. The EAR gate is the part of that literature the data supports.
    Gate 1 asks whether the space is still large enough to narrow, and a list
    truncated to ten always looks settled — which silently disables clarification
    altogether. `Ranker.rank` returns the entire pool ordered for this reason.
-2. **The agent may ask *and* answer on the same turn.** Nothing in the response
-   schema makes `ask_attribute` and `recommendations` mutually exclusive
-   (`dialogue.recommend_on_ask_turns = True`). Two independent gates below can
-   still hold the recommendation list back regardless of whether a question is
-   also asked — see §9, D2.
+2. **The agent asks *and* answers on the same turn — SUPERSEDED 2026-08-31.**
+   Still unconditionally true, but two later gates hold the recommendation list
+   back on early turns regardless: `recommend_min_spans` (wait for the customer
+   to disclose something concrete) and `min_recommend_confidence` (wait for the
+   ranker to commit). See the revised D2 in §9.
 
 ---
 
@@ -729,8 +729,15 @@ commitment — and compound rather than substitute for each other:
 | `min_recommend_confidence` alone | 0.936614 | 1.000 | 0.876048 | 2.310 |
 | **both (live)** | **0.942939** | **1.000** | **0.902464** | 2.390 |
 
-Both default to `0.0`/off and reproduce the ungated behaviour byte-for-byte at
-that setting — rollback is one config value, not a code path removal.
+**The `recommend_on_ask_turns` flag is gone (2026-08-31).** Asking and
+answering may always coexist — that is now unconditional in the code rather
+than a config value, because the alternative was measured and is not a position
+anyone should be able to select: at `False` the agent goes silent on every
+ask-turn, MTTC blows out 2.390 → 8.015 and the score falls to **0.842339**
+(−0.1006), even though MRR *rises* to 0.950464. The gates are about *when there
+is enough evidence to answer*, not about whether asking and answering may
+coexist, and they buy that same MRR selectively at a fraction of the MTTC. Full
+reasoning and measurement in CLAUDE.md.
 
 **D3 — LLM reranker. No, per P4.** Listwise beats pointwise (LRL, arXiv
 2305.02156), but LLM rankers are order-sensitive — which is why permutation
