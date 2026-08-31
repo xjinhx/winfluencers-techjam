@@ -59,7 +59,7 @@ class RetrievalConfig:
     rerank_depth: int = 200
 
     # Conjunctive exact-substring candidate injection
-    # (PRD_conjunctive_injection.md): a product whose search_blob contains
+    # (see CLAUDE.md, 2026-08-31): a product whose search_blob contains
     # EVERY live constraint span verbatim enters the pool regardless of BM25
     # rank. Additive only -- the full fused slice is kept and survivors are
     # appended after it, so nothing is displaced and the reranked set grows.

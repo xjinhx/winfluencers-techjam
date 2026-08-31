@@ -314,6 +314,47 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Synthetic span normalisation: +0.00075 alone, +0.010 on the ceiling
+(2026-08-31).** Named for the cause, not the colour: `intent_card` does not
+only quote the listing — at `local_evaluator.py:57,61` it regex-matches a
+colour word and *inserts a manufactured span* `f"color: {colour}"`. No
+product contains that literal string, so `span_all` failed **for the target
+itself**: 46 of 791 card spans (5.8%) across **42/200 sessions**, 39 of them
+this template, payload present in the blob every time. `state.active_spans()`
+now unwraps the template to its payload (`_SYNTHETIC_SPAN_RE`). This reads
+the simulator's own construction — it is *not* the stemming/punctuation
+tolerance the injection design ruled out of scope. `material` is inserted by
+the same code path and escapes the bug only because it is emitted as a bare
+word; a second template would be caught by the same regex hook.
+
+**Measured, full public 200:** 0.908578 -> **0.909328** (+0.00075). HR@10
+1.000 and MTTC 1.875 both unchanged; MRR 0.753595 -> 0.756095. **Exactly one
+session moves** — `public_0192`, rank 2 -> 1 — and nothing regresses.
+Folds: A **+0.000000**, B **+0.001500** (the moved session is in B). Zero
+fitted parameters, so nothing to overfit; but +0.00075 is two orders of
+magnitude under single-run SE (~0.029) and is **not a verified gain on its
+own**. 49/49 tests.
+
+**Why it is worth keeping anyway — the value is latent, not standalone.**
+The fix is gated behind the same defect as everything else: 45/75
+sub-rank-1 sessions lock in at turn 1, before the colour is ever disclosed,
+so making a span matchable buys nothing until the disclosure arrives. That
+is independent confirmation of the disclosure-timing diagnosis, not a
+disappointing result. Where it pays is the ceiling — and note the previously
+recorded ceiling was **understated**, because those colour spans were failing
+for the target in that calculation too:
+
+| disclosure | ceiling without fix | ceiling with fix |
+|---|---|---|
+| hard constraints only | 0.9449 | **0.9544** |
+| full card | 0.9533 | **0.9638** |
+
+**0.9638 is the first measured number in this project within reach of the
+0.97 target.** Treat this fix as a prerequisite/multiplier for the
+withholding work, not as a gain in its own right. Ceilings hold all other
+features fixed and assume disclosure actually happens, so they bound the
+lever rather than forecast it.
+
 **ADOPTED, always-on: conjunctive exact-substring injection. 0.903753 →
 0.908578, HR@10 1.000 — every public session hits (2026-08-31, per He
 Jinhong: "code out both option A and B and see which one increases the
@@ -324,8 +365,9 @@ The mechanism: a product whose `search_blob` contains **every live
 constraint span verbatim** enters the candidate pool regardless of BM25 rank
 — the route into the pool that `per_field_depth` (measured flat past 1000)
 cannot provide. Full design, feasibility scans, and per-criterion results
-live in `PRD_conjunctive_injection.md`; this entry records the decision and
-what must not be re-derived.
+lived in `PRD_conjunctive_injection.md`, which was **not committed and no
+longer exists** — this entry is now the only record, so treat it as the
+source rather than a summary.
 
 **What's in the code** (`config.py`, `agent.py`): two `RetrievalConfig`
 fields — `injection_min_spans: 2`, `injection_max_survivors: 200` — plus a
@@ -412,20 +454,80 @@ per the "permanent fix" instruction quoted above.
 **Fresh `why_lost` against the adopted build's trace (same day), because the
 old diagnostics predate span_all, title/coverage, and the injection:** at
 rank 2 (31 sessions) and ranks 3-10 (44 sessions), **every constraint and
-span column carries exactly 0.0% of the score gap — `span_all` never once
-separates target from winner.** In all 119 (session, winner) pairs the
-winner *also* matches every disclosed span; the customer's constraints no
-longer distinguish anything the pool hasn't already satisfied. The entire
-gap is text-evidence volume: rank 2 splits bm25_features 28% / bm25_title
-22% / popularity 19% / dense 19%, ranks 3-10 split bm25_features 37% /
-fused 34% / bm25_title 18%. The winners are listings that repeat the query
-words more densely than the target — the same keyword-density bias the
-category-union diagnosis named. **Implication: the remaining 75 sub-rank-1
-sessions need evidence that discriminates *within* the set of
-full-conjunction matches** (e.g. which field the span matches in, how the
-match sits relative to the simulator's constraint source) — another
-all-matched binary or another text-overlap weight cannot separate a pair
-that ties on both.
+span column carries exactly 0.0% of the score gap.** The gap is all
+text-evidence volume: rank 2 splits bm25_features 28% / bm25_title 22% /
+popularity 19% / dense 19%, ranks 3-10 split bm25_features 37% / fused 34% /
+bm25_title 18%.
+
+**CORRECTION, same day, before anything was built on it — this entry first
+read the 0.0% as "the winner also matches every span, so the conjunction
+cannot separate them," and that was WRONG.** The inference skipped a step:
+a 0.0% contribution share is `delta x weight`, and `w_span_all = 0.4` is
+non-zero, so the zero is in the *delta*. Reading the actual listing text
+(the roadmap's own long-deferred rank-2 item) shows why, and says the
+opposite of the original claim:
+
+- **`span_all` ties in 100% of pairs at the hit turn** — 0/31 and 0/44 ever
+  differ. At rank 2 it is 22/31 both-1 and 9/31 both-0.
+- **Because the sessions lock in at turn 1.** `first_hit_turn` is 1 for
+  45 of the 75 sub-rank-1 sessions (20/31 at rank 2, 25/44 at ranks 3-10),
+  median 1. By turn 1 the customer has said almost nothing, so the
+  conjunction is trivially satisfied by both.
+- **The discriminating information exists — it just arrives too late.**
+  Against the *full* `intent_card` (hard + soft), the target matches every
+  span and the winner does not in **52 of 75** sessions (21/31 at rank 2,
+  31/44 at ranks 3-10). The evaluator breaks on first hit, so that evidence
+  never gets to be used.
+
+**Ceiling, measured not guessed** (rescore each hit turn's real pool with
+`span_all`/`span_coverage` recomputed against the card, all other features
+held fixed — optimistic by construction, so read as an upper bound):
+
+| disclosure | MRR | rank-1 sessions | HR@10 | score (MTTC fixed) |
+|---|---|---|---|---|
+| live today | 0.753595 | 125 | 1.000 | 0.908578 |
+| hard constraints only | 0.874589 | 159 | 1.000 | 0.944877 |
+| hard + 1 soft | 0.894589 | 165 | 1.000 | 0.950877 |
+| full card | 0.902506 | 168 | 1.000 | 0.953252 |
+
+**No session is lost or worsened in any variant** — 20 of the 2->1 moves are
+the entire rank-2 bucket's separable half. **Implication, replacing the wrong
+one above: the remaining headroom is a disclosure-timing problem, not a
+feature-invention problem.** The right experiment is a re-run of the
+withholding/ask-more policy, which this file already records as tested and
+rejected (blanket, budget 2-8, net -0.0233) — but that test ran at HR@10
+0.960 with `target_never_in_pool` 6, and its dominant cost was HR@10 -0.0300
+from "more disclosed information makes retrieval worse." **The conjunctive
+injection adopted today removes exactly that mechanism** (a target matching
+every disclosed span now enters the pool regardless of BM25 rank;
+`target_never_in_pool` is 0). The two compose, and the arithmetic now favours
+waiting: one extra turn costs 0.0001 of score per session via MTTC, while
+rank 2 -> 1 pays 0.00075 — **7.5x**. Not yet run; the prior rejection stands
+until it is.
+
+**Second finding from the same text-read, independent of the first and much
+cheaper: 39 constraint spans can never match anything, because the evaluator
+manufactures them.** `intent_card` does not only quote the product — at
+`local_evaluator.py:57,61` it runs `COLOR_RE` over the corpus and *inserts a
+synthesised span* `f"color: {colour}"`. That literal string exists in no
+product's text, so `span_all` fails **for the target itself**. Measured over
+all 200 public targets: **46 of 791 card spans (5.8%) are not contained in
+the target's own `search_blob`, affecting 42/200 sessions — 39 of the 46 are
+the `color: X` template, and all 39 have their payload (`X`) present in the
+blob.** The other 7 are genuine (an `item model number`, a couple of
+unicode-heavy marketing blocks).
+
+This is why 8 of the 31 rank-2 targets score below 4/4 on their own card and
+so cannot be separated from their winner by the conjunction — not because the
+evidence is absent, but because the matcher is looking for a string the
+simulator invented. **The fix is to normalise the known synthetic template to
+its payload before matching (`^color:\s*(.+)$` -> ``), which is reading the
+evaluator's own construction, not fuzzy matching** — the thing
+the injection design ruled out of scope is stemming/punctuation tolerance,
+a different and unmeasured change. Not yet implemented. Expected to
+compound with the disclosure-timing work above rather than duplicate it: it
+raises how often `span_all` can fire at all, which is the feature that work
+depends on.
 
 **ADOPTED: `per_field_depth` 800 → 1000, reopening a decision this file said
 not to re-litigate. 0.900004 → 0.903604 (2026-08-31).**
@@ -1356,15 +1458,24 @@ measured with it in.)
 
 ## Remaining headroom
 
-**Superseded 2026-09-XX by the `per_field_depth` fix above — the numbers below
-predate it and are now wrong in the specifics.** Misses fell 8 → 3 and
-`target_never_in_pool` fell 6 → 1, so "6 targets believed unreachable" and the
-39/83/8-hit rank distribution this table is built on no longer describe the
-live system. The *qualitative* lessons still hold (rank-2 is reranking-hard,
-gated on new features not weights per the LightGBM finding below) — the
-specific hit-counts do not. Kept rather than deleted per this file's own rule;
-a fresh `why_lost` + rank-distribution pass against the new config is the
-correct next step before trusting any number in this section again.
+**Superseded twice — read the "Current state" table and the rank-2 text-read
+entry in "What was found" instead of anything below.** First by the
+`per_field_depth` fix, then decisively on 2026-08-31 by the conjunctive
+injection: **HR@10 is 1.000 and `target_never_in_pool` is 0**, so "6 targets
+believed unreachable" and the 39/83/8-hit distribution this section is built
+on describe a system that no longer exists. The live distribution is
+125/31/35/9 across rank 1 / rank 2 / ranks 3-5 / ranks 6-10, 0 misses.
+
+**The qualitative lesson here is also now wrong, not just the counts.** This
+section said rank-2 was "gated on new features, not weights." The text-read
+finding shows it is gated on *neither*: the separating feature already exists
+(`span_all`, w=0.4) and already works — it simply has nothing to act on,
+because 45 of the 75 sub-rank-1 sessions lock in at turn 1, before the
+customer has disclosed the spans that separate target from winner. With the
+full card the target beats its winner on the conjunction in 52 of 75. The
+measured ceiling from disclosure timing alone is **0.9449 (hard constraints
+only) to 0.9533 (full card)** with MTTC held fixed, no session lost. The
+seven failed reranker attempts were all trying to solve the wrong problem.
 
 **Current 0.862111 (stale, see above). Practical ceiling ~0.970** (6 targets believed unreachable,
 so HR@10 caps near 0.97, which caps MRR at 0.97 too). Headroom ≈ **+0.108**,
@@ -1456,8 +1567,9 @@ Measured against the live 0.862111, not `docs/pending.md`'s 0.7848-era figures.
 
 | priority | item | impact | notes |
 |----------|------|--------|-------|
-| **high** | **New feature for the rank-2 cases** | ≤ +0.0292 | the only remaining route to those 39 sessions. Reweighting is closed (see "What was found"). Start by reading the actual `title`/`features` text of target vs. winner for the 39 |
-| high | Browsing recall | ~+0.02 | 5 of 8 misses and the worst MRR (0.5966) are browsing. Untouched |
+| **high** | **Selective withholding / ask-one-more before recommending** | **≤ +0.036 to +0.045** | the finding of 2026-08-31. 45/75 sub-rank-1 sessions lock in at turn 1; the conjunction that separates them is disclosed later. Ceiling measured at 0.9449-0.9533 (MTTC fixed). Blanket withholding was rejected before, but its dominant cost (HR@10 -0.030 from disclosure hurting retrieval) is the exact mechanism the injection removed. Must be confidence-gated, not blanket, and must be measured on fold B |
+| ~~high~~ | ~~New feature for the rank-2 cases~~ | — | **superseded 2026-08-31.** The separating feature already exists and already has weight; it has nothing to act on at turn 1. Read the text-read entry before building any new column |
+| high | Browsing recall | ~+0.02 | was 5 of 8 misses and the worst MRR. **HR@10 is now 1.000 across every scenario**, so the recall half is closed; browsing MRR (0.6833) is still the weakest and is squarely in the disclosure-timing bucket above |
 | medium | Ranks 6-10 → 1 | +0.0246 | 19 sessions. Same caveat as rank 2 — assume a feature problem until a diagnostic says otherwise |
 | low | Learn `TAG_LEXICON` instead of hand-writing it (P4) | +0.0010 measured | `profile.py:22`; the feature it feeds ablates to inert |
 | low | Decide the fate of the two inert components (P5) | ±0.002 | still undecided; both still shipped |

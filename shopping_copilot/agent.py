@@ -172,7 +172,7 @@ class Agent:
         if not candidate_ids:
             return self._empty_response(state, top_k)
 
-        # Conjunctive injection (PRD_conjunctive_injection.md). The gate tests
+        # Conjunctive injection (see CLAUDE.md, 2026-08-31). The gate tests
         # len(matched) -- selectivity of the conjunction itself -- not the
         # post-dedup count, so a conjunction too common to trust is skipped
         # outright rather than truncated by some other order.

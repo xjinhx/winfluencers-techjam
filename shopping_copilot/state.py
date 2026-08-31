@@ -175,6 +175,9 @@ class ConstraintSpan:
     superseded: bool = False
 
 
+_SYNTHETIC_SPAN_RE = re.compile(r"^color:\s*(.+)$")
+
+
 class ShoppingState:
     """Per-session state. One instance per `reset`."""
 
@@ -357,8 +360,22 @@ class ShoppingState:
             if span.superseded:
                 continue
             text = " ".join(str(span.text).lower().split())
-            if len(text) > 3:
-                out.append(text)
+            if len(text) <= 3:
+                continue
+            # `color: X` is SYNTHESISED by the simulator, not quoted from the
+            # listing: intent_card() regex-matches a colour word in the corpus
+            # and inserts f"color: {colour}" (local_evaluator.py:57,61). That
+            # literal string is in no product's text, so matching it whole
+            # fails for the target itself -- 39 spans across 42/200 public
+            # sessions. Match the payload, which the same regex guarantees is
+            # present. This reads the simulator's own template; it is not
+            # fuzzy or stemmed matching.
+            synthetic = _SYNTHETIC_SPAN_RE.match(text)
+            if synthetic:
+                text = synthetic.group(1).strip()
+                if not text:
+                    continue
+            out.append(text)
         return tuple(dict.fromkeys(out))
 
     def active_bigrams(self) -> set[str]:
