@@ -51,6 +51,7 @@ from tools.offline_eval import (
     load_labels,
     load_trace,
     rank_turn,
+    recommendations_withheld,
 )
 
 UNKNOWN_NAMES = tuple(f"{d}_unknown" for d in DIMENSIONS)
@@ -83,6 +84,7 @@ def losing_pairs(
     joined: dict[str, dict],
     score_fn,
     ranks: set[int],
+    config=None,
 ) -> tuple[list[dict], dict[int, int]]:
     """One record per (session, winner) for every session whose best_rank is
     in `ranks`.
@@ -106,8 +108,11 @@ def losing_pairs(
         override_applied = label["scenario_type"] != "intent_override"
 
         for turn in sorted(turns):
-            ordered = rank_turn(turns[turn], score_fn)[:TOP_K]
-            if override_applied and target in ordered:
+            ranked, scores = rank_turn(turns[turn], score_fn)
+            ordered = ranked[:TOP_K]
+            if recommendations_withheld(scores, turn, config):
+                pass
+            elif override_applied and target in ordered:
                 rank = ordered.index(target) + 1
                 rank_counts[rank] += 1
                 if rank in ranks:
@@ -302,7 +307,7 @@ def main() -> None:
     labels = load_labels(args.public_set)
     joined = join_by_order(order, labels)
 
-    pairs, rank_counts = losing_pairs(groups, joined, score_fn, ranks)
+    pairs, rank_counts = losing_pairs(groups, joined, score_fn, ranks, config)
 
     print(f"replayed {len(order)} sessions from {args.trace}")
     print("rank distribution (replayed):",

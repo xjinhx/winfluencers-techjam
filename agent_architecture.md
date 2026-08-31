@@ -14,10 +14,15 @@ columns in §4a; merge `main` before treating that section as wrong.
 | | HR@10 | MRR | MTTC | Efficiency | TechnicalScore |
 |---|---|---|---|---|---|
 | Official BM25 baseline | 0.125 | 0.068 | 9.81 | 0.119 | 0.1067 |
-| **This system** | **0.990** | **0.747014** | **1.955** | **0.9045** | **0.900004** |
+| **This system** | **1.000** | **0.902464** | **2.390** | **0.8610** | **0.942939** |
+| *superseded 2026-08-31* | *0.990* | *0.747014* | *1.955* | *0.9045* | *0.900004* |
 
-Measured on all 200 public dev sessions, `d2f12ac`, committed
-`config/tuned.json`, unmodified official evaluator. Two sessions miss. 38/38
+Measured on all 200 public dev sessions, `arwen`+`investigation` merge,
+committed `config/tuned.json`, unmodified official evaluator. **No session
+misses**; 168 of 200 convert at rank 1. 56/56 tests. The superseded row is the
+`d2f12ac` measurement this document originally carried, kept for the chain.
+
+*Prior row's caveats, no longer current: "Two sessions miss. 38/38"* —
 unit tests pass. `CLAUDE.md` "Current state" is the number of record — if it and
 this table disagree, it is newer.
 
@@ -445,8 +450,12 @@ exist here. The EAR gate is the part of that literature the data supports.
    Gate 1 asks whether the space is still large enough to narrow, and a list
    truncated to ten always looks settled — which silently disables clarification
    altogether. `Ranker.rank` returns the entire pool ordered for this reason.
-2. **The agent asks *and* answers on the same turn**
-   (`recommend_on_ask_turns=True`, D2 in §9).
+2. **The agent asks *and* answers on the same turn — SUPERSEDED 2026-08-31.**
+   Still true of `recommend_on_ask_turns=True`, but two later gates hold the
+   recommendation list back on early turns regardless: `recommend_min_spans`
+   (wait for the customer to disclose something concrete) and
+   `min_recommend_confidence` (wait for the ranker to commit). See the revised
+   D2 in §9.
 
 ---
 
@@ -578,11 +587,31 @@ pure function of `(candidates, context)` — the property that makes offline rep
 can be ablated, rather than in candidate selection, where it would silently
 delete the ~5% of targets below the popular tail.
 
-**D2 — Emit recommendations on ask-turns? Yes**
+**D2 — Emit recommendations on ask-turns? Yes, but not before the evidence
+arrives. REVISED 2026-08-31.**
+
+*Original decision, kept per supersede-never-delete:* "Yes
 (`dialogue.recommend_on_ask_turns = True`). Nothing in the response schema makes
 `ask_attribute` and `recommendations` mutually exclusive, first-hit turn drives
 MTTC, and a turn that returns nothing is a discarded chance at the hit. The agent
-asks and answers on the same turn.
+asks and answers on the same turn."
+
+**What that reasoning missed.** `local_evaluator.py:252` breaks the session on
+first hit, so the rank at that moment is *final* — a weak early list does not
+merely miss a better rank later, it forecloses it. The original argument is
+correct for HR@10 and MTTC and wrong for MRR. Two gates now hold the list back
+while the turn is uninformative, and they compound:
+
+| | TechnicalScore | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| neither gate | 0.909328 | 1.000 | 0.756095 | 1.875 |
+| `recommend_min_spans: 1` | 0.928002 | 1.000 | 0.833673 | 2.105 |
+| `min_recommend_confidence: 0.054` | 0.936614 | 1.000 | 0.876048 | 2.310 |
+| **both (live)** | **0.942939** | **1.000** | **0.902464** | 2.390 |
+
+`recommend_on_ask_turns` remains `True`: the gates are about *when there is
+enough evidence to answer*, not about whether asking and answering may coexist.
+Full reasoning and measurement in CLAUDE.md.
 
 **D3 — LLM reranker. No, per P4.** Listwise beats pointwise (LRL, arXiv
 2305.02156), but LLM rankers are order-sensitive — which is why permutation

@@ -84,8 +84,62 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.928002`, HR@10 = 1.000 — every public
-session hits.** Measured 2026-08-31 by running the committed
+**Live score: `TechnicalScore = 0.942939`, HR@10 = 1.000, MRR 0.902464,
+MTTC 2.390 — measured 2026-08-31 on the `arwen` + `investigation` merge with
+the unmodified CLI evaluator over all 200 public sessions.** 168 of 200 at
+rank 1, zero misses, 56/56 tests.
+
+**The two recommendation-hold gates were built in parallel and compound.**
+They read different signals and neither supersedes the other, so
+`config/tuned.json` carries both and `agent.py` applies both:
+
+| config | full 200 | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| neither gate | 0.909328 | 1.0000 | 0.756095 | 1.875 |
+| `recommend_min_spans: 1` alone (arwen) | 0.928002 | 1.0000 | 0.833673 | 2.105 |
+| `min_recommend_confidence: 0.054` alone (investigation) | 0.936614 | 1.0000 | 0.876048 | 2.310 |
+| **both (merged, live)** | **0.942939** | **1.0000** | **0.902464** | 2.390 |
+
+The combination is **+0.006325 over the better single gate for +0.08 turns of
+MTTC** — they are not redundant: one asks whether the *customer* has said
+anything concrete, the other whether the *ranker* has committed, and a turn can
+fail either test independently.
+
+**Read MRR 0.902464 against the ceiling.** This file's own span-rescoring
+ceiling for full-card disclosure is MRR ~0.9025. The merged gates land on it,
+which says the disclosure-*timing* lever is now essentially spent: further MRR
+has to come from ranking the disclosed evidence better, not from waiting longer.
+
+**Verification status, stated because it is mixed.** The full-200 figure is
+measured on the unmodified evaluator. **The combination has NOT been fold-split**
+— each gate was validated on folds independently (arwen fold B +0.0193;
+investigation fold B +0.0259), but no held-out number exists for the pair, and
+fold B has now been looked at six times across both branches. Treat 0.942939 as
+in-sample and expect the private 800 lower.
+
+Both lineages below are **superseded by the merged figure above** and kept
+only for the measurement chain. Neither is the live score.
+
+**Superseded lineage — `investigation` branch alone, `TechnicalScore = 0.936614`,
+HR@10 = 1.000.** Measured without the `recommend_min_spans` gate. This is `0.909328` (below) plus the confidence-gated
+recommendation hold (+0.027286, see the top "What was found" entry).
+`config/tuned.json` now carries `min_recommend_confidence: 0.054` and
+`recommend_turn_fallback: 3`; every other value unchanged. Gates: the
+unmodified CLI evaluator reproduces it exactly; `tools.offline_eval`
+against a fresh 95,665-row trace agrees on **200/200** session
+`best_rank`s; `target_never_in_pool` **0**; 56/56 tests pass (51 + 5 added
+for the gate). Default-off (`min_recommend_confidence: 0.0`) re-measures
+**0.909328 byte-identically**, which is the rollback path.
+
+Prior figures, kept for the chain: up from **0.909328** (synthetic span
+normalisation on top of the injection) from **0.908578** (the conjunctive
+injection, `46a6294` plus the injection change) from **0.903753** (that
+tree with the old code) / **0.903604** (`d2f12ac`, the last
+committed-trunk measurement).
+
+**Superseded lineage — `arwen` branch alone, `TechnicalScore = 0.928002`,
+HR@10 = 1.000.** Measured without the `min_recommend_confidence` gate, 2026-08-31,
+by running the committed
 `config/tuned.json` through the unmodified CLI evaluator on all 200 public
 sessions, with `recommend_min_spans: 1` adopted (top "What was found" entry):
 0.909328 → **0.928002**, MRR 0.756095 → 0.833673, MTTC 1.875 → 2.105, hit rate
@@ -137,35 +191,48 @@ fold B. **The 2026-08-30 "don't re-litigate" note was correct for the config
 it was written against; it does not survive `span_all` shipping, and this is
 the re-measurement that note itself called for should new evidence appear.**
 
-| metric | value |
-|---|---|
-| HR@10 | **1.000** (0 misses) |
-| MRR | 0.753595 |
-| MTTC | 1.875 |
-| Efficiency | 0.9125 |
-| **TechnicalScore** | **0.908578** |
+| metric | value | (was, pre-gate) |
+|---|---|---|
+| HR@10 | **1.000** (0 misses) | 1.000 |
+| MRR | 0.876048 | 0.756095 |
+| MTTC | 2.310 | 1.875 |
+| Efficiency | 0.869 | 0.9125 |
+| **TechnicalScore** | **0.936614** | 0.909328 |
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.7961 | 1.3125 |
-| browsing | 80 | 1.0000 | 0.6833 | 1.7375 |
+| buying | 80 | 1.0000 | 0.9056 | 1.825 |
+| browsing | 80 | 1.0000 | 0.8549 | 2.2375 |
 | intent_override | 30 | 1.0000 | 0.8806 | 3.70 |
-| boundary | 10 | 1.0000 | 0.5950 | 2.00 |
+| boundary | 10 | 1.0000 | 0.7950 | 2.60 |
 
-Rank distribution of the 200 hits (from the gated `out_injection` run's
-per-session `best_rank`, cross-checked against the CLI aggregate — exact
-match): **125 at rank 1**, 31 at rank 2, 35 at ranks 3-5, 9 at ranks 6-10.
-With HR@10 saturated, **all remaining headroom is MRR (75 sessions below
-rank 1, up to +0.0739) and efficiency (up to +0.0175, floored by
-intent_override's structural inability to hit before turn 3-4)**. The rank-2
-bucket remains the largest single block below the top and remains gated on
-new feature information, not reweighting — see "Remaining headroom".
+**`intent_override` is byte-identical across the change** (MRR and MTTC both
+unmoved to four decimals) and that is a correctness check, not a
+coincidence: those sessions cannot register a hit before their override turn
+(3 or 4), which is at or past `recommend_turn_fallback = 3`, so the gate can
+never bind for them. If a future threshold change moves this row, the gate
+is firing somewhere it should not.
+
+**Rank distribution, superseded by the gate — recompute before quoting.**
+The pre-gate distribution was 125 rank 1 / 31 rank 2 / 35 ranks 3-5 / 9
+ranks 6-10. The gate moved **39 sessions up and 1 down, losing none**, so
+those counts no longer describe the live build; the gated run's
+per-session `best_rank`s are in `c:/tmp/out_conf_gate.json` (scratch,
+regenerable) rather than restated here, because this file has twice carried
+a distribution that a later change silently invalidated. With HR@10
+saturated at 1.000, remaining headroom is still MRR plus efficiency, but
+efficiency is now the *spent* term rather than the free one — see the gate
+entry in "What was found" for the ceiling this leaves.
 
 **Intent-conditional weighting is adopted and live.** `config/tuned.json` sets
 `w_fused_buying: 0.0` and `w_fused_uncertain: 0.0` against `w_fused: 1.0` — this
 is no longer an open decision, and any doc saying otherwise is stale.
 
 **Stale artefacts — do not quote these as the current score:**
+- **0.909328** is the pre-gate figure — honest, and still the number the
+  build produces with `min_recommend_confidence: 0.0`, which is why it is
+  the documented rollback target rather than simply an old number.
+  Superseded 2026-08-31 by 0.936614.
 - **0.903604 and 0.903753** are the pre-injection figures — `d2f12ac` and the
   `46a6294` working tree respectively, both honest, both superseded
   2026-08-31 by 0.908578 when the conjunctive injection became always-on.
@@ -321,6 +388,296 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**ADOPTED: confidence-gated recommendation hold. 0.909328 → 0.936614,
+fold B +0.0259 (2026-08-31, per arwenalyssa: "can u do build the features
+based on prd confidence gated recommend", then "adopt, don't commit" at
+τ=0.054).** Built from `docs/PRD_confidence_gated_recommend.md`, which this
+session did not author — read the PRD for the full evidence base; this entry
+records what building it actually confirmed.
+
+**The mechanism, in one line:** hold the recommendation list until the ranker
+has committed (NQC over the ranked pool) or until turn 3, whichever comes
+first, instead of recommending on every turn. Two `DialogueConfig` fields, one
+gate in `agent.py`, no new feature, no new retrieval, no new dependency.
+
+**Why holding pays.** `local_evaluator.py:252` breaks on first hit, so the
+rank we are scored on is fixed at the moment we know least — and turn 1 is
+near information-free *by evaluator construction*, not as a property of these
+200 sessions: a browsing opener discloses zero spans and the category name
+covers hundreds of near-identical listings. 60% of sub-rank-1 sessions locked
+in at turn 1. One more turn improves **68%** of the sessions that are losing
+and changes **98%** of the ones already won — that asymmetry is the whole fix.
+
+**Measured, unmodified CLI evaluator, both runs to scratch paths:**
+
+| | full 200 | HR@10 | MRR | MTTC | fold A | fold B |
+|---|---|---|---|---|---|---|
+| default-off (τ=0.0) | 0.909328 | 1.0000 | 0.756095 | 1.875 | 0.902707 | 0.915950 |
+| **τ=0.054, fb=3** | **0.936614** | **1.0000** | 0.876048 | 2.310 | +0.028671 | **+0.025900** |
+
+**39 sessions improved, 1 worsened, 0 lost.** Every published PRD number
+reproduced to six decimals — full set, both folds, MRR and MTTC — which is
+worth recording on its own: the PRD's replay harness is trustworthy for
+recommend-timing policies, as it claimed.
+
+**Why τ=0.054 and not τ=0.085, which scores higher (0.941314) on the public
+200.** Fold B is *tied* (+0.0259 vs +0.0260), so the extra full-set gain lives
+almost entirely in fold A — i.e. in the half that was fitted. τ=0.054 also
+costs 0.4 fewer turns of MTTC and keeps HR@10 at 1.0000. The sweep is a broad
+plateau (fold B flat at +0.021 to +0.026 across τ ∈ [0.052, 0.090]), the same
+non-overfitting signature this file already trusts from `per_field_depth` and
+`constraint_commonness_penalty` — so this is a shape choice on a plateau, not
+a peak that was hunted for. **The low edge was chosen because the failure
+modes are asymmetric: under-holding decays gracefully toward the live
+baseline, over-holding falls off a cliff (fold B decays past τ=0.09, and both
+`hold-4` and τ=0.15 go net negative).**
+
+**The PRD's §6.4 warning was correct, and it is load-bearing rather than
+defensive — verified by deliberately running it both ways.** `agent.py` writes
+the trace *before* the recommendation decision, so a withheld turn still emits
+its full feature rows, and `tools/offline_eval.py` had no notion of a withheld
+turn. Replaying the gated trace with the gate off: **160 agree, 40 disagree** —
+exactly the 39 improved + 1 worsened sessions, i.e. it fails on precisely the
+sessions the gate exists to help. With the patch: **200/200 agree**, MRR
+0.876048 matching live exactly. Anyone who had skipped that patch would have
+seen a loud validation failure and could plausibly have "fixed" it by
+weakening the gate rather than the tool.
+
+**`nqc` has exactly one definition** (`clarify.py`, module level), delegated to
+by both `ClarificationPolicy._confidence` and the new gate, and imported by
+`tools/offline_eval.py`. This is deliberate and is the second-order lesson from
+the `ReplayScorer` unknown-penalty bug already recorded below: a replay tool
+that reimplements a formula silently drifts from it.
+
+**Note the ask gate and the recommend gate share a statistic and nothing
+else.** `ask_max_confidence = 0.82` sits above the entire observed NQC range
+[0.011, 0.194], which is why this file records NQC as "a no-op that never once
+flips a gate decision" — **that gate is not broken, it is unreachable.** The
+new threshold is the same statistic calibrated to the range the system
+actually produces. Do not tune the two together or reason from one to the
+other.
+
+**Two things measured while building that the PRD left open:**
+
+1. **`_empty_response` fires 0 times in 200 sessions** (462 evaluator turns,
+   462 turns emitting trace rows — exact). PRD §4.4 flagged it ungated with
+   "nobody has measured how often this path fires"; on the public set it is
+   dead code, so leaving it ungated costs nothing measurable here. Standard
+   caveat: 0/200 does not prove it never fires on the private 800.
+2. **`Agent.apply_config` does pick this up** (`agent.py:84` sets
+   `self.config`), so the gate is live under `tools.evalkit.Bench` and a
+   future tuning sweep will actually move it. Checked explicitly because this
+   file records two separate build-time-vs-request-time no-op traps
+   (`rerank_depth`, the brand gate) that were only caught by asking.
+
+**Honesty, three ways.** (a) Roughly 20 configurations were scored against
+these same 200 sessions producing the PRD, on top of the 16+ already recorded
+— **quote fold B (+0.0259), not the full-set +0.0273**, in anything
+downstream. The mitigating structural argument is that this is *one* parameter
+over a smooth broad plateau, the safest shape of fit available, categorically
+unlike the 33-free-parameter reranker work that failed here. (b) **HR@10
+1.0000 at τ≤0.054 is a property of this sample, one session deep, not of the
+threshold.** `public_0020` is visible on exactly one turn at NQC 0.0546 —
+between τ=0.054 (show, keep it) and τ=0.056 (hold, lose it permanently).
+Expect to lose ~0.5% of sessions to this at any τ in the plateau on the
+private 800; it is already priced into fold B. (c) **Part of this gain is a
+scoring artifact and should be described as such.** The reason holding pays is
+that the session dies at first hit — real shoppers do not do that; shown a
+mediocre list they keep talking and you get another attempt free. First-hit-
+break is a measurement convention for time-to-first-success, not a model of
+customer patience. This is optimising against the evaluator, which *is* the
+task, but it is **not** evidence users would prefer it. The outside literature
+splits the same way: EAR (Lei et al., WSDM 2020) supports acting only when the
+recommender is confident, while three experiments on withheld information
+(n = 1,811/905/801) found conversational withholding *worse* than in a normal
+UI — mitigated specifically by showing results alongside the question, which
+is what this policy stops doing. §5's preference for the shortest hold is
+partly motivated by that.
+
+**Rollback is one config value:** `min_recommend_confidence: 0.0`, verified
+byte-identical at 0.909328. That is why the field is a threshold rather than a
+boolean — no code path to remove.
+
+**Status: adopted in `config/tuned.json`, NOT committed** (explicit
+instruction). All seven PRD acceptance criteria pass: default-off byte-
+identical ✓, 56/56 tests ✓, single `nqc` ✓, live 0.936614 ✓, offline_eval
+200/200 ✓, fold B +0.0259 ≥ +0.020 ✓, `results.json` untouched ✓. Note the
+`.githooks/pre-commit` guard will require `CLAUDE.md` staged alongside
+`config/tuned.json` whenever this is committed — both are already modified
+together.
+
+**Gender hierarchy fix (live) + brand false-positive gate (adopted, config
+now on) -- both correctness fixes with zero measured public-set effect,
+adopted for the private 800 (2026-08-31, He Jinhong: "what are some
+marketing persuasion tactics... i want to implement that in the agent",
+then "it needs to be a generalised solution", then "brand_max_text_commonness:
+0.01 in tuned.json").** Full writeup: `docs/PRD_merchandising_facets.md`.
+
+**Origin.** Three merchandising tactics were proposed from `public_0199`
+(a boys' briefs target losing rank 2 to a men's competitor): audience
+gating, facet-first ordering, within-cell popularity. A 74-pair
+instrumented capture (all sub-rank-1 sessions, reproduces 0.909328 exactly)
+showed all three lack a precondition -- target and winner tie on every
+live constraint span in 74/74 pairs, and on `evaluate_all` in 73/74. There
+is no facet to partition on at the turn the score locks in. **All three
+original tactics were killed on evidence, including a catalog-derived
+audience-inference design that inverted on the originating session itself**
+(confidently inferred `men` for `public_0199` at 0.73, because "Underwear
+Briefs" is 73% men's catalog-wide). None of this is in code; the PRD is
+the record.
+
+**What survived: two structural bugs found by generalising the same
+own-goal test** (evaluate a target against constraints drawn from its own
+listing, catalog-wide -- not from the 200 public sessions, per He
+Jinhong's explicit generalisation requirement) **across all six
+constraint dimensions:**
+
+| dimension | own-goal rate before fix |
+|---|---|
+| gender | 506/50,000 rows (1.01%) |
+| brand | 114/200 public targets VIOLATED by their own listing |
+
+**1) Gender hierarchy -- `structured.py`, no config flag, live now.**
+`check_gender` treated `kids` as a sibling of `boys`/`girls` rather than
+their parent, so a customer saying "toddler"/"baby" (-> `constraints.gender
+= "kids"`) scored every boys'/girls' listing VIOLATED at -0.23 -- including
+the listing whose own category path produced the word "kids" in the first
+place. Compounded by `ConstraintExtractor.update`'s first-match gender
+scan: "Baby Girls Bodysuits" hit "baby" before "girls" and discarded the
+more specific word. Fixed both: `kids` is now a supertype (SATISFIED
+against boys/girls, not VIOLATED; the reverse is UNKNOWN, not VIOLATED --
+same asymmetry the existing unisex/adult pair already uses), and a
+specific child audience now outranks the generic one during extraction.
+Siblings (`boys` vs `girls`) still VIOLATED; every adult rule untouched.
+**Measured catalog-wide (all 50k rows, not the 200-session sample) against
+the exact opening line each row would generate: own-goal rate 506 -> 180
+rows (1.01% -> 0.36%)**, all 313 hierarchy cases cured, the 180 remaining
+are genuine catalog mislabels (e.g. a men's item filed under a women's
+listing) this fix correctly leaves alone. Public-set exposure was 0/200 --
+observing zero is consistent with a ~0.6%-of-rows defect by chance, not
+with it being unreachable, which is exactly what a public-200-only view
+cannot distinguish. Full evaluator: **0.909328, byte-identical** (this is
+the intended, pre-registered result -- the fix's value is entirely on the
+private 800 and is unverifiable from this set by construction). 51/51
+tests (49 + 2 new).
+
+**2) Brand false positives -- `RetrievalConfig.brand_max_text_commonness`,
+now 0.01 in `config/tuned.json` (was 0.0/disabled).** `BrandVocabulary`
+matches single ordinary words that happen to be store names somewhere in
+a 19,855-brand catalog; `BRAND_BLOCKLIST` is hand-written and missed the
+words the simulator actually quotes. **Measured live at the lock-in turn,
+all 200 sessions: a brand was extracted in 66 sessions and 62 were wrong
+(94% false-positive rate)**, dominated by `wash` (20), `sole` (15),
+`hand` (15), `machine` (11) out of "Machine Wash" / "Rubber sole" listing
+boilerplate. Fix, in the same spirit as `constraint_commonness_penalty`
+(a hardcoded phrase list was explicitly rejected there too): gate
+single-word brand matches by measured catalog text-commonness rather than
+a curated list. Real brands and boilerplate separate two orders of
+magnitude (`sole` 0.206, `wash` 0.317 vs `hanes` 0.0021, `skechers`
+0.0077), so 0.01 is not a delicate cut -- it catches 14/15 observed
+offenders and keeps all 13 real single-word brands tested. Applied at
+*match* time, not build time: `Agent.apply_config` deliberately does not
+rebuild the extractor, so a build-time gate would have been a silent
+no-op under any future tuning sweep -- the same trap `rerank_depth`
+already set once.
+
+**Measured score effect: exactly zero, at every threshold tested
+(0.005-0.20 on fold A; 0.01 on the full 200) -- and the reason is
+mechanical, not a fitting failure.** `check_brand` returns VIOLATED for
+every candidate whose store isn't the extracted brand, so a spurious
+brand applies -0.06 **uniformly** across ~99.4% of any pool, and a
+uniform offset cannot reorder anything. Only two classes of candidate
+differ, both negligible: 8 products in 50,000 (0.016%) are literally
+stored as `Sole`/`Wash`/`Hand`/`Machine`/etc. and would wrongly earn
+`brand_satisfied` +0.18 if one were ever drawn into a 200-candidate pool
+(essentially never); 314 rows (0.63%) have no store and score UNKNOWN
+(0.0) rather than -0.06. **An earlier verbal estimate this session of "a
+0.24-point swing" was corrected before being written into code or this
+file** -- arithmetically right in isolation, practically wrong because it
+assumed the literally-named product reaches the pool, which the 0.016%
+figure rules out. Full evaluator with the flag on: **0.909328, byte-for-
+byte identical to off.** `results.json` untouched; every run scratch-
+pathed per Critical rule 1.
+
+**Adopted anyway, on the same basis as the gender fix.** Both changes are
+justified by catalog-wide measurement (50k rows), not by any public-set
+score movement, which is deliberate: he Jinhong flagged mid-session that
+the private 800 is the real target and a fix tailored to the 200 public
+sessions is worth negative value. The public set proving 0.000000 is the
+pre-registered pass condition for that kind of change, not a null result
+to be disappointed by. Reverting the brand gate instead of shipping it
+disabled-by-default would have been equally defensible (it is ~40 lines
+buying no *measured* score) -- adopted at 0.01 because the false-positive
+rate it removes is real, the fix is cheap, and the failure mode it
+guards against (a spurious brand constraint from ordinary boilerplate) is
+structural to any catalog this large, not specific to these 200 rows.
+
+**Two other tactics from the same session, DO NOT BUILD, evidence in the
+PRD:** catalog-derived audience inference (T1b) fires 43/74 times with 2
+correct-and-decisive against 3 wrong; facet-first sort ordering (T2) has
+a non-constant sort key in only 1/74 pairs. Within-cell popularity (T3)
+is not ruled out structurally but the cross-cell comparison it would
+correct occurs 1/74 times -- optional, not pursued further.
+
+**THE RANK-2 TEXT READ IS DONE, and it closes the question the roadmap has
+carried since 2026-08-30: 0.97 is NOT reachable. The measured hard ceiling is
+~0.95 (2026-08-31, He Jinhong: "can help me run this").** All 30 rank-2 pairs
+read by hand against what the customer had *actually said at the lock-in
+turn* — captured from an instrumented live run (reproduces 0.909328 exactly),
+not reconstructed.
+
+**Verdicts, 30 pairs, three buckets:**
+
+| verdict | meaning | n |
+|---|---|---|
+| **A** | disclosed info already separated them -> ranker got it wrong | **0** |
+| **B** | separable only after more disclosure -> timing | **27** |
+| **C** | not separable even with the full card -> structural tie | **3** |
+
+**Zero A cases is the headline.** There is not one rank-2 session where the
+agent held enough information and still mis-ordered. **The ranker is not
+making avoidable mistakes at rank 2** — which retires, on evidence, the
+theory floated earlier the same day that popularity was drowning constraint
+evidence. Winner-is-more-popular is **15/30**, a coin flip, and in several
+pairs the target is far more popular and loses anyway (`public_0006`: 3042
+ratings vs 41; `public_0058`: 1032 vs 231). Popularity is not the villain.
+
+**The actual state of the world at lock-in: median 1 span live out of a
+median 4-span card. 8 of 30 had ZERO spans — the customer had said nothing
+but a category label. In 0 of 30 was the full card disclosed.** Asking the
+ranker to pick one product out of a category from a bare category name is a
+lottery; rank 2 there is already a good outcome, not a defect.
+
+**The 3 structural ties are real and worth knowing by name.** `public_0058`
+is the cleanest: target JTANIB vs winner Rokka&Rolla, both *"100% Polyester
+Imported Zipper closure"* women's lightweight hooded packable rain jackets,
+both matching 4/4 of the card. No feature, no weighting and no human can
+separate them from the listing text — the evaluator's answer key is arbitrary
+between them. Also `public_0120` and `public_0175`.
+
+**The ceiling, with MTTC priced in — this is the number that kills 0.97.**
+MRR wants more disclosure; MTTC wants fewer turns; the evaluator breaks on
+first hit, so they are in *direct* opposition and you cannot have both:
+
+| disclosure reached by | MTTC | ceiling |
+|---|---|---|
+| turn 1 (free, impossible) | 1.875 | 0.9585 |
+| turn 2 | 2.100 | 0.9540 |
+| **turn 3 (realistic: 4-span card at <=2 spans/ask)** | **2.410** | **0.9478** |
+| turn 4 | 2.760 | 0.9408 |
+
+Even the physically-impossible free-disclosure row is 0.9585. **Realistic
+perfect play on this lever is ~0.947-0.954.** 0.97 would need MRR ~0.97 *and*
+MTTC ~1.5 simultaneously, which the first-hit-break rule forbids.
+
+**What this means for planning.** The remaining work is worth roughly
+**+0.038 (0.9093 -> ~0.947)**, all of it in disclosure timing, and it is
+gated on a policy change (confidence-gated withholding / ask-before-recommend)
+rather than any new feature or learner. Set expectations at **~0.95, not
+0.97**, and treat 0.97 as out of reach on the public set. Artifacts:
+`READING_PACK.txt` (the 30 pairs with dialogue), `capture.py` (instrumented
+run), `reading_rows.json` (the classification) — all in scratch, regenerable.
 
 **Injection gates swept, nothing adopted — `min_spans` is inert and
 `max_survivors` should not be raised (2026-08-31).** Both `RetrievalConfig`
@@ -1673,10 +2030,13 @@ best a wash.
 ## Roadmap (ordered by expected impact)
 
 Measured against the live 0.862111, not `docs/pending.md`'s 0.7848-era figures.
+**The impact column below is stale wherever it predates the 2026-08-31 gate;
+the "Current state" table is authoritative.**
 
 | priority | item | impact | notes |
 |----------|------|--------|-------|
-| **high** | **Selective withholding / ask-one-more before recommending** | **≤ +0.036 to +0.045** | the finding of 2026-08-31. 45/75 sub-rank-1 sessions lock in at turn 1; the conjunction that separates them is disclosed later. Ceiling measured at 0.9449-0.9533 (MTTC fixed). Blanket withholding was rejected before, but its dominant cost (HR@10 -0.030 from disclosure hurting retrieval) is the exact mechanism the injection removed. Must be confidence-gated, not blanket, and must be measured on fold B |
+| ~~high~~ | ~~Selective withholding / ask-one-more before recommending~~ | **+0.027 banked** | **DONE 2026-08-31 — shipped as the confidence-gated hold, 0.909328 → 0.936614, fold B +0.0259.** It landed confidence-gated and fold-B-measured exactly as this row required. Predicted "≤ +0.036 to +0.045"; delivered +0.027, and the shortfall is the deliberate choice of the plateau's low edge over its high end (τ=0.085 reaches 0.9413) because fold B is tied there. See "What was found" |
+| **high** | **Push the hold past the plateau's low edge — only with new evidence** | ≤ +0.005 | the remaining gap between τ=0.054 (0.9366) and the sweep's best public-set point (τ=0.085, 0.9413) is real but sits entirely in fold A. Not worth taking on the public set's say-so; would need either the private-set feedback or a per-intent variant. `buying` is the only scenario carrying HR risk, so an intent-conditional threshold is the obvious shape |
 | ~~high~~ | ~~New feature for the rank-2 cases~~ | — | **superseded 2026-08-31.** The separating feature already exists and already has weight; it has nothing to act on at turn 1. Read the text-read entry before building any new column |
 | high | Browsing recall | ~+0.02 | was 5 of 8 misses and the worst MRR. **HR@10 is now 1.000 across every scenario**, so the recall half is closed; browsing MRR (0.6833) is still the weakest and is squarely in the disclosure-timing bucket above |
 | medium | Ranks 6-10 → 1 | +0.0246 | 19 sessions. Same caveat as rank 2 — assume a feature problem until a diagnostic says otherwise |

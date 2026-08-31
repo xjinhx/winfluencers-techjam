@@ -23,6 +23,7 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
+from shopping_copilot.clarify import nqc
 from shopping_copilot.config import Config
 from shopping_copilot.ranking import INTENT_OVERRIDABLE, LinearModel, build_linear_weights
 
@@ -132,14 +133,38 @@ class ReplayScorer:
         return self.intent_models.get(intent, self.model).score(vector)
 
 
-def rank_turn(rows: list[dict], score_fn) -> list[str]:
-    """Full ordered pool for one turn. Ties break on parent_asin, as live."""
+def rank_turn(rows: list[dict], score_fn) -> tuple[list[str], list[float]]:
+    """Full ordered pool for one turn, and its scores in the same order.
+
+    Ties break on parent_asin, as live. The scores are returned rather than
+    discarded because the recommendation gate (`DialogueConfig.
+    min_recommend_confidence`) runs on them: a replay that cannot see the
+    scores cannot tell a withheld turn from a shown one, and would record a
+    hit the live agent never emitted.
+    """
     scored = [
         (score_fn(row["features"], row.get("intent")), row["candidate_asin"])
         for row in rows
     ]
     scored.sort(key=lambda item: (-item[0], item[1]))
-    return [asin for _, asin in scored]
+    return [asin for _, asin in scored], [score for score, _ in scored]
+
+
+def recommendations_withheld(scores: list[float], turn: int, config: Config | None) -> bool:
+    """Whether the live agent would have suppressed this turn's list.
+
+    Mirrors the gate in `Agent._respond` exactly, on the same `nqc` function
+    and the same input -- the full ranked pool's scores, of which `nqc` reads
+    the top ten. `config=None` means no gate, which is what every caller that
+    predates it gets.
+    """
+    if config is None:
+        return False
+    dialogue = config.dialogue
+    if dialogue.min_recommend_confidence <= 0.0:
+        return False
+    return (turn < dialogue.recommend_turn_fallback
+            and nqc(scores) < dialogue.min_recommend_confidence)
 
 
 def replay_session(
@@ -147,8 +172,15 @@ def replay_session(
     turns: dict[int, list[dict]],
     label: dict,
     score_fn,
+    config: Config | None = None,
 ) -> dict:
-    """Replays the evaluator's per-turn hit test for one session."""
+    """Replays the evaluator's per-turn hit test for one session.
+
+    `config` is optional only so the diagnostics that predate the
+    recommendation gate keep working unchanged; pass it whenever the gate may
+    be on, or the replay will find hits on turns the live agent stayed silent
+    for and disagree on exactly the sessions the gate exists to help.
+    """
     override_turn = label["override_turn"]
     target = label["target"]
     override_applied = label["scenario_type"] != "intent_override"
@@ -156,8 +188,10 @@ def replay_session(
     hit_turn: int | None = None
 
     for turn in sorted(turns):
-        ordered = rank_turn(turns[turn], score_fn)[:TOP_K]
-        if override_applied and target in ordered:
+        ranked, scores = rank_turn(turns[turn], score_fn)
+        ordered = ranked[:TOP_K]
+        withheld = recommendations_withheld(scores, turn, config)
+        if not withheld and override_applied and target in ordered:
             best_rank = ordered.index(target) + 1
             hit_turn = turn
             break
@@ -181,6 +215,7 @@ def offline_metrics(
     groups: dict[tuple[str, int], list[dict]],
     joined: dict[str, dict],
     score_fn,
+    config: Config | None = None,
 ) -> dict:
     """Replays every traced session and aggregates the official metrics."""
     by_session: dict[str, dict[int, list[dict]]] = defaultdict(dict)
@@ -188,7 +223,7 @@ def offline_metrics(
         by_session[session_id][turn] = rows
 
     sessions = [
-        replay_session(session_id, turns, joined[session_id], score_fn)
+        replay_session(session_id, turns, joined[session_id], score_fn, config)
         for session_id, turns in by_session.items()
         if session_id in joined
     ]
@@ -237,8 +272,9 @@ def main() -> None:
     labels = load_labels(args.public_set)
     groups, order = load_trace(args.trace)
     joined = join_by_order(order, labels)
-    scorer = ReplayScorer(Config.load(args.config))
-    result = offline_metrics(groups, joined, scorer)
+    config = Config.load(args.config)
+    scorer = ReplayScorer(config)
+    result = offline_metrics(groups, joined, scorer, config)
 
     pool = target_in_pool(groups, joined)
     missing = sorted(s for s, found in pool.items() if not found)
