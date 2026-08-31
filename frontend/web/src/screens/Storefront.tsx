@@ -46,7 +46,7 @@ export function Storefront({ onAskCopilot }: { onAskCopilot: () => void }) {
             </div>
             <div className="hero-copy">
               <h2 className="hero-title">
-                <RotatingPhrase />,
+                <RotatingPhrase />
                 <br />
                 sorted for you.
               </h2>
