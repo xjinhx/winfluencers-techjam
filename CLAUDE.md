@@ -84,10 +84,19 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.942939`, HR@10 = 1.000, MRR 0.902464,
-MTTC 2.390 — measured 2026-08-31 on the `arwen` + `investigation` merge with
-the unmodified CLI evaluator over all 200 public sessions.** 168 of 200 at
-rank 1, zero misses, 56/56 tests.
+**Live score: `TechnicalScore = 0.942739`, HR@10 = 1.000, MRR 0.902464,
+MTTC 2.400 — measured 2026-09-01 with the unmodified CLI evaluator over all
+200 public sessions.** Zero misses, 60/60 tests.
+
+**This is 0.942939 minus 0.0002, deliberately.** `disclosed_ask_decay: 0.0`
+was adopted on product grounds against a known, measured score loss — see the
+top "What was found" entry before treating this as a regression to chase.
+MRR is byte-identical to the 0.942939 build; the entire delta is one extra
+turn of MTTC on one session.
+
+*The 0.942939 lineage below is the same build with `disclosed_ask_decay: 1.0`,
+which reproduces it byte-identically and is the documented rollback.* Measured
+2026-08-31 on the `arwen` + `investigation` merge: 168 of 200 at rank 1.
 
 **The two recommendation-hold gates were built in parallel and compound.**
 They read different signals and neither supersedes the other, so
@@ -213,13 +222,38 @@ coincidence: those sessions cannot register a hit before their override turn
 never bind for them. If a future threshold change moves this row, the gate
 is firing somewhere it should not.
 
-**Rank distribution, superseded by the gate — recompute before quoting.**
-The pre-gate distribution was 125 rank 1 / 31 rank 2 / 35 ranks 3-5 / 9
-ranks 6-10. The gate moved **39 sessions up and 1 down, losing none**, so
-those counts no longer describe the live build; the gated run's
-per-session `best_rank`s are in `c:/tmp/out_conf_gate.json` (scratch,
-regenerable) rather than restated here, because this file has twice carried
-a distribution that a later change silently invalidated. With HR@10
+**Rank distribution, MEASURED on the live build (2026-09-01), replacing the
+"recompute before quoting" placeholder this section used to carry:**
+
+| rank | sessions |
+|---|---|
+| 1 | **168** |
+| 2 | 18 |
+| 3-5 | 12 |
+| 6-10 | 2 |
+| miss | **0** |
+
+**Per scenario, also the live merged config** — this replaces the
+single-gate table above, which was the best available until now:
+
+| scenario | n | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| buying | 80 | 1.0000 | 0.905625 | 1.825 |
+| browsing | 80 | 1.0000 | 0.910952 | 2.400 |
+| intent_override | 30 | 1.0000 | 0.880556 | 3.733 |
+| boundary | 10 | 1.0000 | 0.875000 | 3.000 |
+
+**Browsing is no longer the weakest scenario — it is now the strongest on
+MRR** (0.9110 against buying's 0.9056), which reverses a claim this file has
+carried since the beginning and which the Roadmap still repeats. The
+recommendation-hold gates did that: browsing openers disclose nothing, so
+they were exactly the sessions locking in a bad rank on turn 1. `boundary`
+(n=10) and `intent_override` are now the weak rows, and both are structural —
+override sessions cannot register a hit before turn 3-4 by construction.
+
+*The pre-gate distribution, for the chain: 125 rank 1 / 31 rank 2 / 35 ranks
+3-5 / 9 ranks 6-10. The confidence gate moved 39 sessions up and 1 down,
+losing none.* With HR@10
 saturated at 1.000, remaining headroom is still MRR plus efficiency, but
 efficiency is now the *spent* term rather than the free one — see the gate
 entry in "What was found" for the ceiling this leaves.
@@ -373,7 +407,7 @@ python -m tools.why_lost --trace c:\tmp\features.jsonl --ranks 3,4,5 --top 30
 python -m tools.tune --output c:\tmp\cfg.json --report c:\tmp\tuning_report.json
 
 # tests
-python -m unittest discover -s tests    # 38 tests (35 copilot + 3 evaluator)
+python -m unittest discover -s tests    # 60 tests
 ```
 
 **Tracing:** set `trace_path` in the config to emit `features.jsonl` (~115k
@@ -388,6 +422,96 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**ADOPTED ON PRODUCT GROUNDS, NOT SCORE: `disclosed_ask_decay: 0.0` — never
+ask about an attribute the customer has already disclosed. Costs −0.0002
+(0.942939 → 0.942739) and was knowingly taken (2026-09-01, per arwenalyssa,
+from a demo screenshot of the agent asking "Do you have a material
+preference?" on the turn right after the customer said "polyester": "can we
+fix this now", then, after being shown the measured cost and told it was a UX
+call rather than a ranking one: "turn it on. i think it's important, even
+though now it's reduced ever so slightly").**
+
+**This is the first change in the project adopted against a measured score
+loss, so the reasoning matters more than usual.** The regression is real but
+two orders of magnitude under single-run SE (~0.029) — unmeasurable on this
+set and on the private 800 alike. What it buys is not a metric: an agent that
+asks about material immediately after the shopper stated their material reads
+as not listening, and the Buyte demo puts that failure in front of judges.
+**Do not "optimise this back" by reverting it — the cost was priced and
+accepted.** Rollback, if the private-set margin ever gets tight enough to care
+about 0.0002, is `disclosed_ask_decay: 1.0`, verified byte-identical at
+0.942939.
+
+*The rest of this entry is the measurement that preceded the decision, and it
+argues against adoption on score grounds. Both halves are true; the call was
+made with the numbers in hand, not in spite of them.*
+
+**The gap is real in code.** `clarify.py:_best_attribute()` skips an attribute
+only if it is in `state.exhausted_attributes` (the customer explicitly refused
+it) and damps it only by `repeat_ask_decay ** state.asked_attributes.count(...)`.
+Neither counts an attribute *answered by disclosure*, so a slot filled from the
+customer's own opening line carries full expected gain and can be asked about
+immediately.
+
+**Measured before building anything, and the probe is the finding.** Instrumented
+live run over all 200 sessions (patching `ClarificationPolicy.decide` and
+`local_evaluator.customer_reply` at runtime; the evaluator file is untouched,
+and the run reproduces 0.942939 exactly):
+
+| | count |
+|---|---|
+| asks issued | 478 |
+| asks that reached `customer_reply` | 248 |
+| replies of "I don't have an additional preference for X" (wasted) | **6** |
+| asks where the attribute's slot was already filled | **2** |
+| …of those, that elicited NEW information | **2** |
+| …of those, that were wasted | **0** |
+
+**Both already-filled asks were productive.** The evaluator hands over at most
+two spans per reply (`local_evaluator.py:181`) and an intent card can hold
+several of the same class, so "the slot is filled" does not mean "the card is
+empty" — asking `material` a second time pulled out the second material span.
+And **5 of the 6 genuinely wasted asks are `feature`**, the evaluator's
+catch-all class, which has no structured slot and is therefore unreachable by
+any filled-slot test. The whole defect on this set is **one** wasted turn.
+
+**Built anyway as a graded lever, swept, rejected.** `DialogueConfig.disclosed_
+ask_decay` (default `1.0` = inert; `0.0` = hard skip) multiplies the gain when
+`_ANSWER_SLOT[attribute]` is in `state.constraints.filled_slots()`. Graded
+rather than a skip precisely because of the two-productive-asks result.
+Unmodified CLI evaluator, scratch configs, `stratified_halves(seed=7)`:
+
+| decay | full 200 | HR@10 | MRR | MTTC | fold A | fold B |
+|---|---|---|---|---|---|---|
+| **1.0 (inert, live)** | **0.942939** | 1.0000 | 0.902464 | 2.390 | 0.940929 | 0.944950 |
+| 0.45 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
+| 0.2 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
+| 0.0 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
+
+Default-off is byte-identical to the live score. **0.45, 0.2 and 0.0 are
+identical to each other**, which is itself informative: the lever flips exactly
+one decision on the whole set at any strength, so there is no threshold to
+tune. MRR is byte-identical everywhere, fold B is byte-identical everywhere,
+and the entire −0.0002 is one extra turn of MTTC on one session. −0.0002 is two
+orders of magnitude under single-run SE and is not a *measurable* regression —
+but there is no measurable gain to weigh against it either, and the mechanism
+says why: the lever can only fire where the ask was working.
+
+**Status: ADOPTED at `0.0` in `config/tuned.json`** (the hard skip, since every
+non-inert value scores identically — there was no reason to pick a softer one).
+Live score is now **0.942739**. 60/60 tests (56 + 4 pinning that `1.0` is a
+true no-op, that `0.0` is a hard skip, and that `style`/`feature`/`other` stay
+askable forever because "already answered" is unobservable for them).
+`results.json` untouched; every run went to a scratch path per Critical rule 1.
+
+**Reasoning error worth keeping:** the first diagnosis of this (written from
+reading `clarify.py` alone) asserted the redundant ask "wastes one of ten
+turns". True for one session in 200; false as a general claim, and the opposite
+of true for the two sessions where the mechanism actually fires. *"The gate is
+missing"* and *"adding the gate improves an outcome"* are different claims —
+the same error this file already records against the `injection_min_spans`
+probe, recurring within the day.
 
 **ADOPTED: confidence-gated recommendation hold. 0.909328 → 0.936614,
 fold B +0.0259 (2026-08-31, per arwenalyssa: "can u do build the features

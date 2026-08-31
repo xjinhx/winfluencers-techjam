@@ -9,19 +9,28 @@ more than another retrieval call.
 ## Results
 
 Measured on the 200 public development sessions using the official local
-evaluator (`evaluator/local_evaluator.py`, unmodified), 2026-08-31.
+evaluator (`evaluator/local_evaluator.py`, unmodified), 2026-09-01.
 
 | Configuration | HR@10 | MRR | MTTC | TechnicalScore |
 |---|---|---|---|---|
 | Official weak BM25 baseline | 0.125 | 0.068 | 9.81 | 0.1067 |
 | Ours — default weights | 0.885 | 0.554 | 3.23 | 0.7641 |
-| **Ours — current (`config/tuned.json`)** | **1.000** | **0.902464** | **2.390** | **0.942939** |
+| **Ours — current (`config/tuned.json`)** | **1.000** | **0.902464** | **2.400** | **0.942739** |
 
 `TechnicalScore = 0.50 × HR@10 + 0.30 × MRR + 0.20 × Efficiency`, where
 `Efficiency = clip((11 − MTTC) / 10, 0, 1)`.
 
 An 8.8× improvement over the provided baseline, zero misses across all 200
-public sessions (168 of them at rank 1), and mean turns-to-conversion of 2.39.
+public sessions, and mean turns-to-conversion of 2.40.
+
+**One deliberate 0.0002 was spent on behaviour rather than score.**
+`disclosed_ask_decay: 0.0` stops the agent asking about an attribute the
+shopper has already told it — asking "do you have a material preference?" one
+turn after they said "polyester" reads as an agent that is not listening. It
+costs 0.942939 → 0.942739, entirely as one extra turn of MTTC on one session
+(MRR is byte-identical), which is two orders of magnitude under this set's
+~0.029 standard error. Taken knowingly; rollback is `disclosed_ask_decay: 1.0`.
+The tables below predate it and are all at 0.942939.
 
 **Read this as in-sample, and read the two gates that got it there separately —
 they were built independently and neither one predicts the other's contribution:**
@@ -31,7 +40,7 @@ they were built independently and neither one predicts the other's contribution:
 | neither recommendation-hold gate | 0.909328 | 1.0000 | 0.756095 | 1.875 |
 | `recommend_min_spans: 1` alone | 0.928002 | 1.0000 | 0.833673 | 2.105 |
 | `min_recommend_confidence: 0.054` alone | 0.936614 | 1.0000 | 0.876048 | 2.310 |
-| **both, live (`config/tuned.json`)** | **0.942939** | **1.0000** | **0.902464** | 2.390 |
+| **both (before `disclosed_ask_decay`)** | **0.942939** | **1.0000** | **0.902464** | 2.390 |
 
 Each gate was validated on a held-out fold independently (+0.0193 and +0.0259
 respectively), but the *combination* has not itself been fold-split — treat
@@ -40,16 +49,25 @@ Single-run standard error on this 200-session set is ~0.029; the private
 800-session set has roughly half that noise. Full reasoning and every
 intermediate score in the chain that got here is in `CLAUDE.md`.
 
-Per scenario, single-gate breakdown (`min_recommend_confidence` alone — the
-best per-scenario table available; the merged config has not been re-sliced
-by scenario):
+Per scenario, on the shipped config:
 
 | scenario | n | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
-| buying | 80 | 1.0000 | 0.9056 | 1.825 |
-| browsing | 80 | 1.0000 | 0.8549 | 2.2375 |
-| intent_override | 30 | 1.0000 | 0.8806 | 3.70 |
-| boundary | 10 | 1.0000 | 0.7950 | 2.60 |
+| buying | 80 | 1.0000 | 0.905625 | 1.825 |
+| browsing | 80 | 1.0000 | 0.910952 | 2.400 |
+| intent_override | 30 | 1.0000 | 0.880556 | 3.733 |
+| boundary | 10 | 1.0000 | 0.875000 | 3.000 |
+
+Rank distribution across the 200 sessions: **168 at rank 1**, 18 at rank 2,
+12 at ranks 3–5, 2 at ranks 6–10, and no misses.
+
+Browsing was the weakest scenario on every metric for most of this project and
+is now the strongest on MRR. That is the recommendation-hold gates doing their
+job: a browsing session opens with a category name and nothing else, so it was
+precisely the case that used to lock in a poor rank on turn 1. The weak rows
+are now `intent_override` and `boundary`, and both are structural —
+override sessions cannot register a hit before the override arrives on turn
+3–4.
 
 ---
 
@@ -351,8 +369,8 @@ metrics to `results.json`. Expected output:
 ```
 HR@10  1.000
 MRR    0.902464
-MTTC   2.390
-TechnicalScore  0.942939
+MTTC   2.400
+TechnicalScore  0.942739
 ```
 
 Tuned weights live in `config/tuned.json` and are loaded automatically by
@@ -363,7 +381,7 @@ and public labels are unmodified from the participant kit.
 Other entry points:
 
 ```bash
-python -m unittest discover -s tests          # 56 unit tests
+python -m unittest discover -s tests          # 60 unit tests
 python -m tools.demo --sample public_0002      # one full multi-turn transcript
 python -m tools.ablate                         # regenerate the ablation table
 python -m tools.measure_attribute_yield        # regenerate the disclosure table
@@ -401,7 +419,7 @@ shopping_copilot/
 tools/                         tune, ablate, demo, offline_eval, why_lost, separability,
                                 measure_attribute_yield, measure_span_selectivity, read_pairs,
                                 stem_audit, train_pairwise, evalkit
-tests/                         56 unit tests (test_shopping_copilot.py, test_evaluator.py)
+tests/                         60 unit tests (test_shopping_copilot.py, test_evaluator.py)
 config/tuned.json              Tuned weights (loaded by default) — the live submission config
 docs/                          report.md, PRDs, ablations, rank-2/rank-diagnostic reads,
                                 competition spec, submission rules, tuning report
