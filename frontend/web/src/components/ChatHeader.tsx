@@ -2,6 +2,7 @@ import backIcon from "../assets/icons/back.svg";
 import avatarMark from "../assets/icons/avatar-mark.svg";
 import liveDot from "../assets/icons/live-dot.svg";
 import { MoreIcon } from "./NavIcons";
+import { MethodologyNotes } from "./MethodologyNotes";
 import "./ChatHeader.css";
 
 export function ChatHeader({
@@ -32,6 +33,7 @@ export function ChatHeader({
           </span>
         </div>
       </div>
+      <MethodologyNotes />
       <MoreIcon className="more-icon" />
     </div>
   );

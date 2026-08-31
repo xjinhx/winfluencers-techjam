@@ -1,4 +1,4 @@
-.dev-banner {
+.session-bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -8,7 +8,7 @@
   flex-shrink: 0;
 }
 
-.dev-banner-tag {
+.session-bar-tag {
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   background: var(--color-accent-teal);
@@ -17,10 +17,11 @@
   font-weight: 700;
   font-size: 10px;
   letter-spacing: 0.3px;
+  text-transform: uppercase;
   flex-shrink: 0;
 }
 
-.dev-banner-text {
+.session-bar-text {
   font-family: var(--font-body);
   font-size: 11px;
   color: var(--color-text-on-dark-secondary);

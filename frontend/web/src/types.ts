@@ -35,3 +35,25 @@ export interface ChatTurn {
   recommendations?: EnrichedProduct[];
   matchedNote?: string;
 }
+
+export interface SimulationTurn {
+  turn: number;
+  customer_message: string;
+  agent_message: string;
+  ask_attribute: string | null;
+  recommendations: EnrichedProduct[];
+  target_rank: number | null;
+}
+
+export interface SimulationResult {
+  sample_id: string;
+  scenario_type: string;
+  difficulty_bucket: string | null;
+  user_profile_summary: string;
+  target: EnrichedProduct;
+  hit: boolean;
+  first_hit_turn: number | null;
+  best_rank: number | null;
+  reciprocal_rank: number;
+  turns: SimulationTurn[];
+}

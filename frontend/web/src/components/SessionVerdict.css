@@ -1,0 +1,32 @@
+.session-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  margin-left: 36px;
+}
+
+.session-verdict-hit {
+  background: rgba(61, 219, 217, 0.14);
+  border: 1px solid var(--color-accent-teal);
+}
+
+.session-verdict-miss {
+  background: rgba(201, 123, 132, 0.14);
+  border: 1px solid var(--color-accent-rose);
+}
+
+.session-verdict-title {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--color-text-on-dark-primary);
+}
+
+.session-verdict-detail {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-on-dark-secondary);
+  line-height: 1.4;
+}

@@ -1,0 +1,109 @@
+.methodology-trigger {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--color-stroke-on-dark);
+  background: var(--color-bg-shell-dark-raised);
+  color: var(--color-text-on-dark-secondary);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.methodology-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 5, 6, 0.72);
+  display: flex;
+  align-items: flex-end;
+  z-index: 20;
+}
+
+.methodology-panel {
+  width: 100%;
+  max-height: 82%;
+  overflow-y: auto;
+  background: var(--color-bg-shell-dark-raised);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  padding: 20px 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.methodology-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--color-text-on-dark-primary);
+}
+
+.methodology-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: none;
+  color: var(--color-text-on-dark-secondary);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+}
+
+.methodology-panel p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-on-dark-secondary);
+}
+
+.methodology-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 4px 0;
+}
+
+.methodology-stats div {
+  background: var(--color-bg-shell-dark);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.methodology-stats dt {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  color: var(--color-text-on-dark-secondary);
+  margin: 0 0 2px;
+}
+
+.methodology-stats dd {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--color-accent-teal);
+  margin: 0;
+}
+
+.methodology-formula {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--color-text-on-dark-secondary);
+  background: var(--color-bg-shell-dark);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.methodology-caveat {
+  font-style: italic;
+}
