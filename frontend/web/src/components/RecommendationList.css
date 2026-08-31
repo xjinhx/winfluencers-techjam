@@ -1,0 +1,46 @@
+.recommendation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  padding-left: 36px;
+}
+
+.recommendation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.recommendation-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rank-pill {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 10px;
+  color: #0d0d0f;
+}
+
+.rank-pill-teal {
+  background: var(--color-accent-teal);
+}
+
+.rank-pill-rose {
+  background: var(--color-accent-rose);
+}
+
+.matched-note {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  color: var(--color-text-on-dark-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
