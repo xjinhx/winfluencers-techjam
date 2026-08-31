@@ -322,6 +322,45 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**Injection gates swept, nothing adopted — `min_spans` is inert and
+`max_survivors` should not be raised (2026-08-31).** Both `RetrievalConfig`
+fields existed only as code defaults and had never been tuned. Swept
+`injection_min_spans ∈ {1,2,3}` × `injection_max_survivors ∈
+{50,100,200,400,800}` on fold A, 15 configs, 727s. **Live default reproduced
+exactly (0.929679), and HR@10 stayed 1.000 in all 15** — no variant is unsafe,
+none is better. Fold B was deliberately **not** spent: fold A plus mechanism
+answered it.
+
+| fold A | 50 | 100 | 200 | 400 | 800 |
+|---|---|---|---|---|---|
+| min_spans=1 | 0.929829 | 0.929679 | 0.929679 | 0.922779 | 0.922779 |
+| min_spans=2 *(live)* | 0.929829 | 0.929679 | **0.929679** | 0.924578 | 0.924578 |
+| min_spans=3 | 0.929829 | 0.929679 | 0.929679 | 0.929679 | 0.929679 |
+
+**`min_spans` 1/2/3 are byte-identical at any survivor cap ≤ 200.** The
+hypothesis going in was that the gate is redundant: a probe over all 200
+sessions found 138 turn-observations with exactly one span, of which **112 are
+rejected by `max_survivors` anyway**, 1 has zero survivors, and only **25 are
+blocked by `min_spans` alone — with the target among the survivors in 24 of
+them (96%)**. All true, and all irrelevant: those 24 targets were *already*
+reachable through ordinary BM25, so injecting them again adds a candidate that
+was already in the pool. **The reasoning error is worth keeping: "the gate
+blocks X" and "unblocking X changes an outcome" are different claims, and the
+probe only measured the first.** There is also an interaction — the
+`recommend_min_spans: 1` withholding adopted the same day means sessions now
+hold 2+ spans by the turn that scores, so the gate stopped binding.
+
+**The real finding is the other axis: raising `max_survivors` to 400 costs
+0.005–0.007** (0.929679 → 0.922779 at min_spans=1). Looser conjunctions dilute
+the pool. Note it only hurts when `min_spans` is low — at 3 the conjunctions
+are precise enough that the cap never binds, which is why the bottom row is
+flat. **200 is well-placed; this table is the evidence against loosening it.**
+`max_survivors=50` is +0.00015, a hundredth of the noise floor, not a result.
+
+Survivor counts are extraordinarily bimodal — p25 = **1 product**, p50 = 372,
+p90 = 9,804, and 56% of span-sets exceed 200 — so there is almost no mass near
+any threshold, which is why this axis is flat until it falls off a cliff.
+
 **Evidence-gated recommendation withholding: 0.909328 → 0.928002 (+0.018674),
 HR@10 held at 1.000 (2026-08-31).** The disclosure-timing lever this file
 recorded as *"not yet run; the prior rejection stands until it is"* — now run.
