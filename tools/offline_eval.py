@@ -168,9 +168,11 @@ def recommendations_withheld(
     disclosure gate is then skipped rather than guessed at, and `main` warns
     when that combination could actually change a verdict.
 
-    Not mirrored: `recommend_on_ask_turns`, because a trace records no
-    clarification decision. It is `True` in every shipped config and so
-    suppresses nothing; setting it `False` would make this replay optimistic.
+    Every suppressor in `Agent._respond` is mirrored here. That is only true
+    because `recommend_on_ask_turns` was deleted 2026-08-31: it keyed off the
+    clarification decision, which a trace does not record, so while it existed
+    this replay could be made silently optimistic by one config edit. Do not
+    reintroduce a suppressor that reads something the trace does not carry.
     """
     if config is None:
         return False

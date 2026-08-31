@@ -13,16 +13,23 @@ section 7 possible at all -- and it puts the popularity prior in the reranker,
 where it can be ablated, rather than in candidate selection, where it would
 silently delete the ~5% of targets that sit below the popular tail.
 
-**D2 (recommend on ask-turns).** Yes -- but not before the evidence arrives.
-Nothing in the response schema makes `ask_attribute` and `recommendations`
-mutually exclusive, so the agent asks *and* answers on the same turn. That
-argument is correct for HR@10 and MTTC and wrong for MRR: the evaluator breaks
-on first hit, so a weak early list does not miss a better rank later, it
-forecloses it. Two gates below hold the list back while a turn is
+**D2 (recommend on ask-turns).** Yes -- unconditionally, but not before the
+evidence arrives. Nothing in the response schema makes `ask_attribute` and
+`recommendations` mutually exclusive, so the agent asks *and* answers on the
+same turn. That argument is correct for HR@10 and MTTC and wrong for MRR: the
+evaluator breaks on first hit, so a weak early list does not miss a better rank
+later, it forecloses it. Two gates below hold the list back while a turn is
 uninformative -- `recommend_min_spans` (has the customer said anything
 concrete?) and `min_recommend_confidence` (has the ranker committed?). They
 read different signals, compound, and are both inert at their defaults. There
 is exactly one NQC threshold on that decision; see `config.py`.
+
+The `recommend_on_ask_turns` flag that used to guard this was removed
+2026-08-31: measured at `False` it scores 0.842339 against 0.942939
+at `True`, so there was no decision left for it to represent. Suppressing a
+list *because* a question was asked is not a policy anyone should be able to
+select by config; withholding when the turn is uninformative is, and that is
+what the two gates do.
 
 No LLM call anywhere on the turn path. The system is fully offline and
 deterministic; `usage` is reported as zero because no model is invoked.
@@ -259,7 +266,6 @@ class Agent:
         # either test independently. Both are inert at their defaults, and both
         # carry their own turn cap -- an uncapped hold turns a hit into a miss,
         # which costs the 0.5-weighted term to save the 0.2-weighted one.
-        # `recommend_on_ask_turns` (D2 above) is the third, oldest suppressor.
         dialogue = self.config.dialogue
         # `spans` is the disclosure count already computed for the injection
         # above -- the same evidence, read twice for two different decisions.
@@ -273,15 +279,10 @@ class Agent:
             and turn < dialogue.recommend_turn_fallback
             and nqc([s for _, s in ranked]) < dialogue.min_recommend_confidence
         )
-        asked_instead = (
-            clarification.attribute is not None
-            and not dialogue.recommend_on_ask_turns
-        )
         withhold = (
             turn < dialogue.recommend_min_turn
             or starved
             or unconvinced
-            or asked_instead
         )
         recommendations = (
             [] if withhold else [{"parent_asin": asin} for asin in ordered]

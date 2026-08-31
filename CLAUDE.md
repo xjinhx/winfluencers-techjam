@@ -87,7 +87,10 @@ no build step, no external dependencies (see Critical rule 5).
 **Live score: `TechnicalScore = 0.942939`, HR@10 = 1.000, MRR 0.902464,
 MTTC 2.390 — measured 2026-08-31 on the `arwen` + `investigation` merge with
 the unmodified CLI evaluator over all 200 public sessions.** 168 of 200 at
-rank 1, zero misses, 56/56 tests.
+rank 1, zero misses, 56/56 tests. Re-verified byte-identical after the same-day
+post-merge cleanup and the `recommend_on_ask_turns` removal, both of which are
+behaviour-preserving by construction — see "What was found". `config/tuned.json`
+lost the `recommend_on_ask_turns` key in that removal; no value changed.
 
 **The two recommendation-hold gates were built in parallel and compound.**
 They read different signals and neither supersedes the other, so
@@ -389,6 +392,57 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
+**REMOVED: the `recommend_on_ask_turns` flag. Asking and answering on the same
+turn is now unconditional in code (2026-08-31, per He Jinhong: "am i supposed
+to turn it on or off", then "just implement it into the code directly, no more
+flags since there is no decision to be made").** Measured first, then deleted —
+the measurement is what established there was no decision left to represent.
+Same treatment the conjunctive injection got, for the same reason.
+
+| | score | HR@10 | MRR | MTTC | eff |
+|---|---|---|---|---|---|
+| `true` (live) | **0.942939** | 1.0000 | 0.902464 | 2.390 | 0.861 |
+| `false` | 0.842339 | 0.9950 | 0.950464 | 8.015 | 0.298 |
+
+**The shape is the interesting part, and it is a clean reproduction of the
+older finding at higher resolution: MRR *rises* (+0.048, 18 sessions better,
+0 worse) and the score still collapses.** Decomposed: MRR +0.0144, HR@10
+−0.0025, efficiency **−0.1124**. Silence on every ask-turn drags MTTC 2.390 →
+8.015 and efficiency 0.861 → 0.298 — the efficiency term outweighs the rank
+gain roughly 8:1, and one session is lost outright.
+
+**Why `false` is not a position worth keeping selectable, even though
+withholding demonstrably helps ranks:** the two adopted gates already buy that
+same MRR *selectively* — they hold only when the customer has disclosed nothing
+(`recommend_min_spans`) or the ranker has not committed
+(`min_recommend_confidence`), and both release by turn 3-4. Suppressing a list
+*because a question was asked* is the blunt version of the same idea stacked on
+top of the precise one. **Do not rebuild this as a way to raise MRR; the MRR
+gain is real and is not the problem.**
+
+**Deleting it also closed a tooling hazard for good, which is the second reason
+it went rather than being pinned to `True`.** `tools/offline_eval.py` could not
+mirror this term — it keyed off the clarification decision, which a trace does
+not record — so a single config edit could have made every replay silently
+optimistic while still reporting a clean agreement count. With the flag gone,
+**every suppressor in `Agent._respond` is now mirrored**, and the invariant is
+written into the tool's docstring: do not add a suppressor that reads something
+the trace does not carry.
+
+**Removed from `config/tuned.json` as well as from `DialogueConfig`, and that
+matters:** `config._build` silently ignores unknown keys, so a stale
+`"recommend_on_ask_turns": false` left in the JSON would have looked like a
+setting and done nothing.
+
+**Verification (mandatory, since this edits the live submission config):**
+unmodified CLI evaluator before and after the removal is **byte-identical on
+every metric** — 0.942939 / HR@10 1.0000 / MRR 0.902464 / MTTC 2.390 /
+efficiency 0.861 — and **200/200 sessions agree on `best_rank` between the two
+runs**, not merely in aggregate. `tools.offline_eval` against a fresh
+98,927-row trace: **200 agree, 0 disagree**, `target_never_in_pool` 0. 56/56
+tests. `results.json` untouched; every run to scratch paths per Critical
+rule 1.
+
 **Post-merge cleanup of the two recommendation gates — behaviour-preserving,
 and it uncovered a broken validation gate (2026-08-31, per He Jinhong: "can we
 fix this, clean it up").** `7b97272` merged the `arwen` disclosure gate and the
@@ -412,9 +466,10 @@ recoverable from a trace at all), `recommendations_withheld` mirrors both gates
 as the same OR, and `main` warns loudly when the config uses the span gate but
 the trace predates the field. **After: 200/200 agree, MRR matching live
 exactly.** Traces written before today cannot validate this build — regenerate
-rather than trusting an old one. Still not mirrored, now documented in the
-docstring: `recommend_on_ask_turns`, since a trace records no clarification
-decision; it is `True` everywhere so it suppresses nothing.
+rather than trusting an old one. **Every suppressor in `Agent._respond` is now
+mirrored** — the one that could not be (`recommend_on_ask_turns`, which keyed
+off the clarification decision a trace does not record) was deleted the same
+day; see the entry above.
 
 **This is the third time a replay tool has silently drifted from the code it
 replays** (`ReplayScorer`'s stale unknown-penalty loop; `offline_eval` missing

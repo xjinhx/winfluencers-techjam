@@ -226,11 +226,6 @@ class DialogueConfig:
     ask_turn_budget: int = 8          # at turn >= this, stop asking and answer
     ask_min_info_gain: float = 0.05
 
-    # D2 in the architecture doc: nothing in the schema makes `ask_attribute`
-    # and `recommendations` exclusive, and every silent turn is a discarded
-    # chance at a hit that MTTC would have rewarded.
-    recommend_on_ask_turns: bool = True
-
     # D2 has a cost D2 did not price. The evaluator stops the session at the
     # first turn the target appears in the top ten, so that rank is final --
     # surfacing a weak list early does not just miss a better rank later, it
