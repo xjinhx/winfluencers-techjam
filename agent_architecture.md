@@ -2,12 +2,9 @@
 
 **Status:** as-built. This describes the system that exists. The code is the
 authority; where this doc and the code disagree, the code is right and this doc
-is stale.
-
-**Describes `origin/main` @ `d2f12ac`** — the trunk and the submission state.
-Feature branches are sometimes behind it. If `FEATURE_NAMES` is 38 rather than
-40 in your checkout, you are missing `ab4e55c` and the two coverage-interaction
-columns in §4a; merge `main` before treating that section as wrong.
+is stale. This document describes the *final* design only — the reasoning that
+survived, not the path taken to it. Build history, rejected experiments, and
+every intermediate score belong in `CLAUDE.md`, not here.
 
 **Scoring target:** TechnicalScore = 0.50·HR@10 + 0.30·MRR + 0.20·Efficiency
 
@@ -15,16 +12,11 @@ columns in §4a; merge `main` before treating that section as wrong.
 |---|---|---|---|---|---|
 | Official BM25 baseline | 0.125 | 0.068 | 9.81 | 0.119 | 0.1067 |
 | **This system** | **1.000** | **0.902464** | **2.390** | **0.8610** | **0.942939** |
-| *superseded 2026-08-31* | *0.990* | *0.747014* | *1.955* | *0.9045* | *0.900004* |
 
-Measured on all 200 public dev sessions, `arwen`+`investigation` merge,
-committed `config/tuned.json`, unmodified official evaluator. **No session
-misses**; 168 of 200 convert at rank 1. 56/56 tests. The superseded row is the
-`d2f12ac` measurement this document originally carried, kept for the chain.
-
-*Prior row's caveats, no longer current: "Two sessions miss. 38/38"* —
-unit tests pass. `CLAUDE.md` "Current state" is the number of record — if it and
-this table disagree, it is newer.
+Measured on all 200 public dev sessions, committed `config/tuned.json`, unmodified
+official evaluator. **No session misses**, 168 of 200 convert at rank 1. 56/56
+tests. `CLAUDE.md` "Current state" is the number of record if this table and it
+ever disagree.
 
 Section numbers are cited from `shopping_copilot/config.py` (`architecture doc
 S3`, `S4b`, `S6`, `S7`, `S8`, `P2`, `D2`). **Do not renumber them.**
@@ -32,9 +24,13 @@ S3`, `S4b`, `S6`, `S7`, `S8`, `P2`, `D2`). **Do not renumber them.**
 **Two sources of weights, and they differ on purpose.** Dataclass defaults in
 `config.py` are pre-adoption values, chosen so a new feature is inert until
 switched on and prior behaviour stays exactly recoverable
-(`constraint_commonness_penalty=0.0`, `w_span_all=0.0`, `per_field_depth=220`).
-The live submission weights are `config/tuned.json`. Numbers quoted in this doc
-are the tuned ones; they move, so read the config for truth.
+(`constraint_commonness_penalty=0.0`, `brand_max_text_commonness=0.0`,
+`w_span_all=0.0`, `per_field_depth=220`). The live submission weights are
+`config/tuned.json`. Numbers quoted in this doc are the tuned ones; they move,
+so read the config for truth. The conjunctive injection (§3, Route C) is the
+one mechanism without an off-switch — its two gates (`injection_min_spans=2`,
+`injection_max_survivors=200`) are unconditional defaults, not something
+`tuned.json` overrides, and were swept and confirmed optimal rather than fit.
 
 ---
 
@@ -72,6 +68,14 @@ path, no network, no third-party dependency, stdlib only. Submission rules warn
 that organizer policy may disable network access for official scoring, and a
 graded submission has to return the same list twice. `usage` is reported as zero
 because no model is invoked. This principle closes D3 (§9).
+
+**P5 — The evaluator breaks on first hit, so a turn spent before the ranker has
+evidence is a turn that permanently forecloses a better rank.**
+`local_evaluator.py:252` stops a session the moment the target first appears in
+the top 10; there is no credit for a better placement discovered later. This is
+the reason retrieval is designed around *recall into the pool* (§3) rather than
+top-1 precision alone, and the reason the agent withholds recommendations until
+it has something worth being scored on (§5, D2).
 
 ---
 
@@ -146,7 +150,15 @@ point:**
 |---|---|---|
 | `active_terms()` | token set | feeds BM25 and `coverage` |
 | `active_bigrams()` | ordered bigram set | phrase evidence — separates the target from unigram-similar neighbours |
-| `active_spans()` | **whole strings, untokenised** | the conjunctive signal (§4a). `"95% Polyester, 5% Spandex"` matches 5.3% of a category where `polyester` alone matches 41.2% |
+| `active_spans()` | **whole strings, untokenised** | the conjunctive signal (§4a) and injection route (§3). `"95% Polyester, 5% Spandex"` matches 5.3% of a category where `polyester` alone matches 41.2% |
+
+**`active_spans()` also normalises one evaluator-specific construction.**
+`local_evaluator.py`'s `intent_card()` synthesises a colour span as the literal
+string `f"color: {colour}"`, which exists in no product's own text — matching it
+whole fails for the target itself. `active_spans()` unwraps that one known
+template to its payload before returning, so the span conjunction can still
+fire on colour disclosures. This reads the simulator's own construction; it is
+not stemming or fuzzy matching, which stays explicitly out of scope.
 
 `query()` also applies the commonness damping described in §3.
 
@@ -154,10 +166,13 @@ point:**
 
 ## 3. Retrieval — `index.py`, `dense.py`, `fusion.py`, driven by `agent.py`
 
-**Two routes, fused.** Structured constraints are *not* a retrieval route — they
-are reranker features (§4a). This keeps the system inside the regime the fusion
-evidence covers: Bruch et al. studied fusing **two** retrievers and explicitly
-leave three-or-more to future work.
+**Two fused routes, plus a third that bypasses fusion entirely for an exact,
+conjunctive case.** Structured constraints are *not* a retrieval route — they
+stay reranker features (§4a). Fusing exactly two ranked routes keeps the system
+inside the regime the fusion evidence covers: Bruch et al. studied fusing **two**
+retrievers and explicitly leave three-or-more to future work. The injection
+route below sidesteps that limit by not being a *ranked* fusion input at all —
+it is a conjunctive filter that adds or omits a candidate, never scores one.
 
 ### Route A — lexical, five per-field BM25 indexes
 
@@ -248,25 +263,62 @@ identically zero and destroy the tail ordering MRR depends on.
 Combination is over the **union**, so a document only one route found still gets
 its contribution, scored against zero on the other side.
 
+### Route C — conjunctive exact-substring injection
+
+A product whose `search_blob` contains **every currently live constraint span
+verbatim** enters the candidate pool regardless of its BM25 or dense rank —
+the route into the pool that no per-field depth cutoff can provide, because a
+target can genuinely rank past any fixed depth on ordinary term matching and
+still be the *only* candidate that satisfies every span jointly.
+
+```
+spans = state.active_spans()
+if len(spans) >= injection_min_spans:                # 2, unconditional default
+    survivors = [p for p in catalog if all(s in p.search_blob for s in spans)]
+    if 0 < len(survivors) <= injection_max_survivors:  # 200, unconditional default
+        candidate_ids += survivors not already present
+```
+
+**Additive only, appended after the full fused slice — never prepended, never
+displacing.** The reranked set only grows; nothing already in the fused pool is
+pushed out to make room. A displacing variant was tried and rejected: it fixed
+the one candidate it targeted but knocked two unrelated targets out of the pool
+entirely by consuming the tail of `rerank_depth`.
+
+**Unconditional in code — there is no config flag to disable it.** The two
+gates are its selectivity control, not an enable switch, and were swept across
+a wide grid (`min_spans` 1/2/3 × `max_survivors` 50–800) rather than merely
+assumed correct: the shipped defaults reproduced the best result found. Below
+`injection_min_spans`, a single boilerplate span (e.g. "polyester") matches a
+fifth of the catalog on its own — nowhere near selective enough to trust
+unconditionally. A conjunction with more than `injection_max_survivors`
+survivors is skipped outright for that turn rather than truncated by some
+arbitrary order, which would reintroduce the same dilution that ruled out a
+broader candidate-injection design (a full category-taxonomy union) during
+development.
+
+Survivor scans are cached by the exact `active_spans()` tuple for the session's
+lifetime — the span set only changes on turns that disclose something new, so a
+ten-turn session costs two or three catalog scans, not ten.
+
 ### Depth
 
 | knob | tuned | controls |
 |---|---|---|
-| `per_field_depth` | 800 | how many docs each field may surface before fusion |
+| `per_field_depth` | 1000 | how many docs each field may surface before fusion |
 | `candidate_depth` | 200 | pool size after fusion |
-| `rerank_depth` | 200 | how many of those get a feature vector |
+| `rerank_depth` | 200 | how many of those get a feature vector (injected survivors are re-appended past this cut, never lost to it) |
 | `dense_depth` | 150 | Route B's own cutoff |
 
-**Recall lost here cannot be recovered downstream**, and depth is the
-second-largest lever in the system (§8). The ablation shows the mechanism
-cleanly: cutting the pool to 20 *raises* MRR while dropping HR@10 — a shallow
-pool ranks what it contains slightly better and simply lacks the rest.
-
-`per_field_depth` is worth understanding as a category of change: a depth cutoff
-is not a coefficient that can be shaped to fit noise in a tuning fold. Raising it
-only makes more genuinely-matching documents visible, introducing no new degree
-of freedom to overfit against. Held-out score improved at least as much as train
-at every value ≥800.
+**Recall lost here cannot be recovered downstream**, and depth is one of the
+largest levers in the system (§8). Retrieval recall into the candidate pool
+saturates completely once `per_field_depth` clears roughly 800–1000 — pushing it
+far higher buys nothing further, so this is not an open-ended dial. A depth
+cutoff is not a coefficient that can be shaped to fit noise in a tuning fold,
+unlike widening `candidate_depth` (which surfaces whatever ranks next by raw
+score, relevant or not, and measurably dilutes MRR): raising `per_field_depth`
+only makes more *genuinely-matching* documents visible, and held-out score
+improves at least as much as fitted score at every value tested.
 
 ---
 
@@ -290,17 +342,31 @@ than read off the agent, so a replay can reconstruct it exactly from a log line.
 | context | `profile_affinity`, `category_focus`, `title_low_coverage`, `popularity_low_coverage` |
 
 **Six constraint dimensions:** gender, brand, category, price, material, color.
+Extraction and scoring are deliberately never a hard filter (P2) — a candidate
+missing the field scores `unknown`, never eliminated.
 
 **Three-way, encoded as separate columns.** `satisfied` and `violated` are
 distinct binary columns rather than one signed column, so they carry independent
 weights — violating a stated gender (−0.230) is far more costly than satisfying
-it (+0.055) is valuable. Per P2, `unknown` is a mild penalty and never an
-exclusion; three of six are non-zero under the tuned config (gender −0.01,
-category −0.005, price −0.005).
+it (+0.055) is valuable. `unknown` is a mild penalty and never an exclusion;
+three of six are non-zero under the tuned config (gender −0.01, category −0.005,
+price −0.005).
 
 `unknown` is a **first-class feature column**, so `LinearModel` alone reproduces
 the final ordering. Any tool that applies a separate post-hoc unknown-penalty is
 double-counting.
+
+**Gender is a hierarchy, not a flat set of siblings.** `kids` is the *parent* of
+`boys`/`girls`, not a sibling — a customer saying "toddler" or "baby" resolves to
+`gender="kids"`, and a boys'-or-girls' listing satisfies that (not violates it);
+the reverse (customer said `boys`, listing only says `kids`) is `unknown`, not
+`violated` — less specific is not conflicting. Siblings (`boys` vs `girls`) still
+violate each other, and every adult pairing is untouched. Extraction also
+prefers the more specific child audience over the generic one when both appear
+in the same phrase (e.g. "Baby Girls Bodysuits" resolves to `girls`, not `kids`).
+Both corrections matter because the customer's opening line is frequently built
+from the *target's own* category path — the naive flat-equality version could
+score a listing `violated` against language lifted from itself.
 
 **Material and colour do not emit `violated` under the shipped configuration**,
 and the mechanism is not symmetric between them:
@@ -310,19 +376,34 @@ and the mechanism is not symmetric between them:
   not evidence of conflict.
 - `check_material` has a `violated` branch, reached only for a *qualified*
   mention (a "faux leather" match against a wanted `leather`) and gated by the
-  module constant `FAKE_MATERIAL_MODE`, currently `"unknown"`.
+  module constant `FAKE_MATERIAL_MODE`, currently `"unknown"` — some public
+  targets are themselves only faux/PU leather, and the customer's stated
+  material is derived from the target's own listing, so `violated` there would
+  penalise the correct answer.
 
-Consequence worth knowing before tuning: `material_violated` (−0.020) and
-`color_violated` (−0.015) are non-zero in `config/tuned.json` and currently
-**unreachable** — no candidate lands in those columns.
+**Brand extraction is gated by measured catalog commonness, not a curated
+list.** `BrandVocabulary` matches single ordinary words that happen to be a
+store name somewhere in a ~20,000-brand catalog — "Machine Wash" and "Rubber
+sole" boilerplate extract as brands `wash`/`sole`/`hand`/`machine` far more
+often than any real single-word brand does. Rather than hand-maintaining a
+blocklist (which only ever covers cases someone thought of),
+`brand_max_text_commonness` drops a single-word brand match when that word's
+measured document-frequency ratio across title/features/categories exceeds the
+threshold — real brands and ordinary words separate by two orders of magnitude
+(`sole` 0.206 / `wash` 0.317 vs. `hanes` 0.0021 / `skechers` 0.0077), so the cut
+needs no per-word curation. Applied at *match* time inside `BrandVocabulary.find`
+rather than at index-build time, because `Agent.apply_config` deliberately does
+not rebuild the extractor — a build-time gate would be a silent no-op under any
+config sweep that only changes the threshold.
 
-**`span_all` is the conjunctive signal.** `phrase_*` measures ordered-bigram
-*overlap*, which cannot distinguish "3 of 4 spans matched" from "all 4" — both
-can produce identical bigram sets. `span_all` is 1.0 iff *every* live constraint
-span matches, tested against `Product.search_blob`, a lowercased match surface
-built once at catalog load. The conjunction is the discriminative part: four
-disclosed spans that each match 13–41% of a category can jointly cut 284
-candidates to 2. `span_coverage` (the fraction matched) is carried at weight 0.0.
+**`span_all` is the conjunctive signal (`w_span_all = 0.4` tuned).** `phrase_*`
+measures ordered-bigram *overlap*, which cannot distinguish "3 of 4 spans
+matched" from "all 4" — both can produce identical bigram sets. `span_all` is
+1.0 iff *every* live constraint span matches, tested against
+`Product.search_blob`, a lowercased match surface built once at catalog load.
+The conjunction is the discriminative part: four disclosed spans that each
+match 13–41% of a category can jointly cut 284 candidates to 2. `span_coverage`
+(the fraction matched) is carried at weight 0.0.
 
 **Coverage interactions.** `title_low_coverage` and `popularity_low_coverage` are
 literally `bm25_title * (1 - coverage)` and `popularity * (1 - coverage)`, both
@@ -351,11 +432,12 @@ that **feature engineering and dataset characteristics set the performance
 ceiling rather than model class**. That is the operating assumption here: the
 features are the contribution, and the model is a way of adding them up.
 `ScoringModel` is a Protocol, so a fitted model drops in behind the same
-interface without the retriever or the feature function changing.
+interface without the retriever or the feature function changing — evaluated
+directly (§8) rather than assumed.
 
 **Intent-conditional weighting.** `Ranker` builds one `LinearModel` per routed
 intent; any feature in `INTENT_OVERRIDABLE` may carry a different weight per
-intent, unset falling back to the shared default. Currently live:
+intent, unset falling back to the shared default. Live:
 
 ```
 w_fused           = 1.0
@@ -380,9 +462,14 @@ features rewritten underneath it.
 
 ---
 
-## 5. Clarification Policy — `clarify.py`
+## 5. Clarification Policy — `clarify.py`, and the recommendation hold in `agent.py`
 
-**The highest-value component in the system (P1).**
+**The highest-value component in the system (P1).** Two decisions live here:
+*when to ask a clarifying question* (the EAR gate) and, independently, *when to
+show recommendations at all* (the two hold gates, §9 D2) — they read different
+signals and both apply.
+
+### 5.1 The ask gate
 
 **Grounding: the EAR gate (Lei et al. 2020).** Ask only when (1) the candidate
 space is still large enough to be worth narrowing, (2) a question still carries
@@ -408,7 +495,9 @@ post-retrieval query performance prediction with no ground truth available: the
 standard deviation of the top-10 scores, normalised by the top score. High
 spread means the ranker clearly pulled some candidates ahead and is worth
 trusting; scores bunched together mean it did not, and a question is worth more
-than an answer.
+than an answer. `nqc()` is defined once, module-level in `clarify.py`, and is
+the single source both the ask gate and the recommendation hold (§9) read —
+never reimplemented, including in the offline replay tool (§7).
 
 **Gate 3 is where this departs from the literature, and the departure is a
 measurement.** Entropy alone picks `category` and `brand`: they partition the
@@ -450,12 +539,11 @@ exist here. The EAR gate is the part of that literature the data supports.
    Gate 1 asks whether the space is still large enough to narrow, and a list
    truncated to ten always looks settled — which silently disables clarification
    altogether. `Ranker.rank` returns the entire pool ordered for this reason.
-2. **The agent asks *and* answers on the same turn — SUPERSEDED 2026-08-31.**
-   Still true of `recommend_on_ask_turns=True`, but two later gates hold the
-   recommendation list back on early turns regardless: `recommend_min_spans`
-   (wait for the customer to disclose something concrete) and
-   `min_recommend_confidence` (wait for the ranker to commit). See the revised
-   D2 in §9.
+2. **The agent may ask *and* answer on the same turn.** Nothing in the response
+   schema makes `ask_attribute` and `recommendations` mutually exclusive
+   (`dialogue.recommend_on_ask_turns = True`). Two independent gates below can
+   still hold the recommendation list back regardless of whether a question is
+   also asked — see §9, D2.
 
 ---
 
@@ -477,13 +565,28 @@ the path is live if the catalog assumption ever changes.
 
 **Tracing.** Setting `trace_path` in the config appends a feature row per scored
 candidate (~115k rows, ~45 MB per run). Tracing is passive and verified not to
-change results.
+change results. Rows are written **before** the recommendation-hold decision
+(§9), so a withheld turn's candidates are still logged — replay has to know
+about the hold independently, see below.
 
 **The replay gate, and it is the most important tool in the repo.**
 `tools/offline_eval.py` reproduces the ranker from a trace and must agree with
 the live evaluator **session by session on `best_rank` — all 200 of them, not
 merely on aggregate MRR.** Aggregate agreement hides compensating errors; this
 gate has caught real defects that aggregate MRR would have passed.
+
+**The replay must apply the confidence-based hold to see what the live agent
+actually returned.** `rank_turn()` returns both the ordering and its scores;
+`recommendations_withheld()` re-derives the same NQC-vs-`min_recommend_confidence`
+decision `Agent._respond` makes, using the one shared `nqc()` function. Without
+this, replay finds a "hit" on a turn the live agent stayed silent for —
+disagreeing on exactly the sessions the hold exists to help, and only there,
+which makes the failure easy to misdiagnose as the hold itself being wrong.
+**This coverage does not currently extend to the span-count hold
+(`recommend_min_spans`/`recommend_max_wait`)** — that gate is validated only by
+matching the live evaluator's aggregate output, not session-by-session replay;
+treat any offline diagnostic run under a config with `recommend_min_spans > 0`
+as unverified until that gap is closed.
 
 **Freeze the retriever before fitting anything.** Negatives are mined from the
 retriever's own output, so any model learns to correct *that specific retriever*.
@@ -526,12 +629,19 @@ configurations have been scored against it:
 - **Prefer changes that add information to the vector over changes that
   redistribute weight within it.** The features that have generalised on this
   problem — the span conjunction, commonness damping, retrieval depth — all
-  supplied something the vector did not previously contain.
-- **Re-measure the merge.** Two branches developed in parallel are each scored
-  against a baseline lacking the other, so their gains do not simply add. Record
-  the commit next to every number you report; a branch checkout silently changes
-  `FEATURE_NAMES`, `config/tuned.json` and the test count under any analysis in
-  flight.
+  supplied something the vector did not previously contain. Seven independent
+  attempts at a learned reranker over the *existing* feature set (five linear,
+  one regularised sklearn model, one LightGBM `lambdarank`) all failed to beat
+  the tuned linear model on held-out folds — the best result was a tie. Redoing
+  that work is not worthwhile without first giving the vector genuinely new
+  information; `tools/separability.py` checks whether a given feature set can
+  even in principle win a target rank bucket before any learner is trained on it.
+- **Re-measure the merge.** Independently-developed changes are typically
+  sub-additive — verified directly on two changes developed in parallel off the
+  same parent commit, each addressing a distinct gap (the span conjunction, and
+  the title/popularity-vs-coverage interaction in §4a): about 85% of their
+  separately-measured gains survived combining them. Never assume two gains
+  simply add; re-measure the combination.
 
 **Four evaluator facts that will silently corrupt an offline analysis:**
 
@@ -544,15 +654,15 @@ configurations have been scored against it:
 3. **`best_rank` is first-hit-in-top-10, not full-pool rank.** For
    `intent_override` sessions any hit *before* the override turn is ignored, and
    the evaluator breaks on first hit — so recommending early locks in whatever
-   rank you have.
+   rank you have (P5).
 4. **`difficulty_bucket` is deterministic from `scenario_type`** and carries no
    extra information. Slicing on it is redundant.
 
 **Ablation table for the writeup** — one row per component, HR@10 / MRR / MTTC,
 live in `docs/ablations.md`. It is what makes Technical Execution legible to
-judges. The ordering has been stable across every tuning round: clarification
-(−0.4473) dominates, then candidate depth, then popularity priors, then phrase
-evidence.
+judges. The relative ordering has been stable across every tuning round:
+clarification dominates by an order of magnitude, then candidate depth, then
+popularity priors, then phrase evidence.
 
 **On the popularity prior.** State plainly in the README and demo that
 popularity-as-feature is correct for this benchmark and wrong for a production
@@ -587,31 +697,40 @@ pure function of `(candidates, context)` — the property that makes offline rep
 can be ablated, rather than in candidate selection, where it would silently
 delete the ~5% of targets below the popular tail.
 
-**D2 — Emit recommendations on ask-turns? Yes, but not before the evidence
-arrives. REVISED 2026-08-31.**
+**D2 — Recommend on ask-turns, but not before there is evidence to be scored
+on.** `recommend_on_ask_turns = True`: nothing in the response schema makes
+`ask_attribute` and `recommendations` mutually exclusive, and a turn that
+returns nothing is a discarded chance at the hit. But per P5 the evaluator
+breaks on first hit, so a weak early list does not just miss a better rank
+later — it forecloses it permanently. Two independent gates hold the
+recommendation list back while a turn is uninformative, and both apply (an AND,
+either may suppress):
 
-*Original decision, kept per supersede-never-delete:* "Yes
-(`dialogue.recommend_on_ask_turns = True`). Nothing in the response schema makes
-`ask_attribute` and `recommendations` mutually exclusive, first-hit turn drives
-MTTC, and a turn that returns nothing is a discarded chance at the hit. The agent
-asks and answers on the same turn."
+- **`recommend_min_spans`** (1, tuned) — withhold while the customer has
+  disclosed fewer than this many constraint spans, up to `recommend_max_wait`
+  (4) turns, after which the cap fires regardless so a customer who never
+  discloses anything is not met with silence forever. Answers the question "has
+  the customer said anything concrete yet?"
+- **`min_recommend_confidence`** (0.054, tuned) — withhold while turn <
+  `recommend_turn_fallback` (3) and the ranker's NQC over the ordered pool is
+  below threshold. Answers the question "has the ranker actually separated its
+  candidates?" — the same statistic the ask gate uses (§5.1), calibrated to a
+  different, much lower range: the observed NQC distribution on this catalog
+  never approaches `ask_max_confidence` (0.82), so that gate and this one must
+  not be tuned together or reasoned from one to the other.
 
-**What that reasoning missed.** `local_evaluator.py:252` breaks the session on
-first hit, so the rank at that moment is *final* — a weak early list does not
-merely miss a better rank later, it forecloses it. The original argument is
-correct for HR@10 and MTTC and wrong for MRR. Two gates now hold the list back
-while the turn is uninformative, and they compound:
+The two gates read different signals — customer disclosure vs. ranker
+commitment — and compound rather than substitute for each other:
 
 | | TechnicalScore | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
 | neither gate | 0.909328 | 1.000 | 0.756095 | 1.875 |
-| `recommend_min_spans: 1` | 0.928002 | 1.000 | 0.833673 | 2.105 |
-| `min_recommend_confidence: 0.054` | 0.936614 | 1.000 | 0.876048 | 2.310 |
+| `recommend_min_spans` alone | 0.928002 | 1.000 | 0.833673 | 2.105 |
+| `min_recommend_confidence` alone | 0.936614 | 1.000 | 0.876048 | 2.310 |
 | **both (live)** | **0.942939** | **1.000** | **0.902464** | 2.390 |
 
-`recommend_on_ask_turns` remains `True`: the gates are about *when there is
-enough evidence to answer*, not about whether asking and answering may coexist.
-Full reasoning and measurement in CLAUDE.md.
+Both default to `0.0`/off and reproduce the ungated behaviour byte-for-byte at
+that setting — rollback is one config value, not a code path removal.
 
 **D3 — LLM reranker. No, per P4.** Listwise beats pointwise (LRL, arXiv
 2305.02156), but LLM rankers are order-sensitive — which is why permutation
@@ -625,17 +744,39 @@ reproducibility and rules, not on quality.
 
 *Live numbers in `CLAUDE.md`.*
 
-HR@10 is near ceiling, and a small number of targets are genuinely unidentifiable
-from anything the customer is able to say — at least one has been traced turn by
-turn and confirmed to carry no distinguishing information anywhere in the
-session. Remaining headroom is therefore mostly **MRR**, concentrated in sessions
-that retrieve the target and place it a position or two off the top.
+**HR@10 is at 1.000 across all 200 public sessions — every target reaches the
+candidate pool and is returned somewhere in the top 10.** All remaining
+headroom is therefore MRR (0.30 of the score) and, to a lesser extent,
+Efficiency via MTTC — placing a target that is already found closer to rank 1,
+sooner.
 
-**Browsing is the weakest track on every metric** and holds the remaining misses.
-It is the least-explored area, and the one where new information would pay most.
+**A direct read of every rank-2 session's dialogue against what the ranker
+actually held at the scoring turn found zero cases of an avoidable ranking
+mistake.** Of 30 rank-2 pairs read by hand: in **0** the disclosed information
+already separated target from winner and the ranker still got it wrong; in
+**27** the two were separable only with *more* disclosure than the customer had
+given by the scoring turn (a timing problem, not a ranking one); in **3** the
+two listings are genuine ties — near-identical products that match the customer's
+entire stated card equally and cannot be separated by any feature, human
+judgement included. Popularity is not the dominant factor either way: the more
+popular listing wins only 15 of 30 times.
 
-The reliable route there is a **new feature** — something the vector does not
-currently measure — rather than a new weighting over the existing 40 columns.
-`tools/separability.py` will compute, for any candidate feature set, whether a
-linear scorer can win a given rank bucket without losing the sessions already
-won; run it before building against that band.
+**The state of disclosure at lock-in is the actual constraint.** Across those 30
+sessions the median was 1 live constraint span out of a typical 4-span card, and
+8 of 30 had disclosed *nothing* but the category name at the turn that decided
+their score. This is what the recommendation-hold gates (§9, D2) exist to fix,
+and the measured ceiling — rescoring each hit turn's real candidate pool against
+the fuller card it would have disclosed one or two turns later, MTTC held
+fixed — comes out around **0.947–0.954** for realistic play (a 4-span card
+disclosed at roughly 2 spans per ask) against a physically-unreachable
+free-disclosure limit near 0.958. The evaluator's first-hit-break rule puts MRR
+and MTTC in direct opposition, which is why this ceiling, not 1.0, is the honest
+target for this lever.
+
+**The reliable next lever is therefore not a new feature or a reweighting of
+the existing 40 columns — it is disclosure timing, and it is already close to
+spent.** `tools/separability.py` checks, for any candidate feature set, whether
+a linear scorer can win a given rank bucket without losing sessions already won;
+run it before proposing new columns aimed at the rank-2/3 bands, since the
+evidence above says the bottleneck there is what the customer has said, not what
+the ranker does with it.
