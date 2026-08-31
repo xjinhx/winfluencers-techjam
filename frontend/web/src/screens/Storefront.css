@@ -100,19 +100,22 @@
   height: 380px;
 }
 
+/* The mascot sits behind the copy (z-index 0 against .hero-feature-inner's
+   1) and is lifted clear of the card's bottom edge, so it reads as part of
+   the backdrop rather than a figure standing on the floor of the card. */
 .hero-mascot {
   position: absolute;
   right: 14px;
-  bottom: -6px;
+  bottom: 18px;
   height: 130px;
   width: auto;
-  z-index: 1;
+  z-index: 0;
 }
 
 @media (min-width: 640px) {
   .hero-mascot {
     right: 36px;
-    bottom: -10px;
+    bottom: 40px;
     height: 230px;
   }
 }
@@ -120,6 +123,7 @@
 .hero-feature-inner {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   padding: 22px;
