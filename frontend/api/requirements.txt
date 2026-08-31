@@ -1,0 +1,7 @@
+# Dependencies for the demo API wrapper ONLY. Kept separate from the root
+# requirements.txt, which must stay empty per CLAUDE.md critical rule 5 (the
+# scored agent is stdlib-only). Nothing here touches shopping_copilot/.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+boto3==1.35.74

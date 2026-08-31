@@ -1,0 +1,25 @@
+.quick-replies {
+  display: flex;
+  gap: 8px;
+  padding-left: 36px;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.quick-reply-chip {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-shell-dark-raised);
+  border: 1px solid var(--color-accent-teal);
+  color: var(--color-accent-teal);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.quick-reply-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

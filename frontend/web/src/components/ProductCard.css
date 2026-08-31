@@ -1,0 +1,124 @@
+.product-card {
+  background: var(--color-bg-card-light);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.product-card-art {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+}
+
+.art-light {
+  position: absolute;
+  left: -40px;
+  top: -60px;
+  width: 220px;
+  height: 220px;
+}
+
+.art-silhouette {
+  position: absolute;
+  left: 28px;
+  top: 32px;
+  width: 115px;
+  height: 140px;
+}
+
+.ai-badge {
+  position: absolute;
+  left: 126px;
+  top: 172px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 4px 8px 4px 7px;
+  border-radius: var(--radius-pill);
+}
+
+.ai-badge span {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 8.5px;
+  letter-spacing: 0.6px;
+  color: #1c1a17;
+}
+
+.product-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 12px 14px;
+}
+
+.product-card-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.18;
+  color: var(--color-text-on-light-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.product-card-rating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rating-value {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--color-text-on-light-primary);
+}
+
+.rating-count {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--color-text-on-light-secondary);
+}
+
+.product-card-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+}
+
+.price {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--color-text-on-light-primary);
+}
+
+.price-unavailable {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--color-text-on-light-secondary);
+}
+
+.product-card-price-row .store {
+  margin-left: auto;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  color: var(--color-text-on-light-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
