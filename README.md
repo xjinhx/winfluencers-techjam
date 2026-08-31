@@ -578,8 +578,8 @@ promising unexplored direction that has not yet been tried.
 ## Team contributions
 
 - **He Jinhong** — conjunctive candidate injection, gender-hierarchy and
-  brand-false-positive structural fixes, rank-2 text-read and ceiling analysis,
-  learned-reranker sweep (sklearn + LightGBM), project direction and PRD review
+  brand-false-positive structural fixes
+- **Ng Yee Teng** —rank-2 text-read and ceiling   analysis, learned-reranker sweep (sklearn + LightGBM), project direction and PRD review
 - **Arwen Tan** — evidence-gated recommendation withholding
   (`recommend_min_spans`), span-selectivity and injection-gate sweeps
 - **Dylan Huang** — `per_field_depth` recall fix, `constraint_commonness_penalty`,
