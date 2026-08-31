@@ -59,12 +59,39 @@
   padding: 0;
 }
 
+.methodology-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.methodology-tab {
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-stroke-on-dark);
+  background: var(--color-bg-shell-dark);
+  color: var(--color-text-on-dark-secondary);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.methodology-tab-active {
+  background: var(--color-accent-teal);
+  border-color: transparent;
+  color: #0d0d0f;
+}
+
 .methodology-panel p {
   margin: 0;
   font-family: var(--font-body);
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--color-text-on-dark-secondary);
+}
+
+.methodology-panel p b {
+  color: var(--color-text-on-dark-primary);
+  font-weight: 600;
 }
 
 .methodology-stats {
