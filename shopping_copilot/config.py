@@ -333,6 +333,20 @@ class DialogueConfig:
     # returns. Each prior ask multiplies the expected yield by this.
     repeat_ask_decay: float = 0.45
 
+    # The same diminishing return, for an attribute the customer answered by
+    # *disclosure* rather than in response to an ask. `repeat_ask_decay` only
+    # counts asks, so nothing damped an attribute whose slot was already filled
+    # -- which is why the agent could ask "do you have a material preference?"
+    # on the turn after the customer stated their material.
+    #
+    # Graded rather than a skip, because a filled slot does NOT mean the card
+    # is empty: the customer discloses at most two spans per turn and the
+    # intent card can hold several of the same class. Measured on the public
+    # 200, this fires on 2 asks and BOTH of them elicit a second, previously
+    # undisclosed span -- so a hard skip would forfeit real information to
+    # avoid a cosmetic repetition. 1.0 is inert (default); 0.0 is the hard skip.
+    disclosed_ask_decay: float = 1.0
+
     # How much an overridden constraint span's weight decays once superseded
     # (state.observe's override_decay). It stays in the query, just quieter.
     override_decay: float = 0.25

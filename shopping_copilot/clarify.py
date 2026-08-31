@@ -50,6 +50,22 @@ _QUESTION = {
 }
 
 
+# Which `Constraints` slot would already hold the answer to each attribute.
+# `style`, `feature` and `other` have no slot: the evaluator's
+# `classify_constraint` uses them as catch-alls for spans this system never
+# parses into a structured field, so "already answered" is unobservable for
+# them and they are always considered open.
+_ANSWER_SLOT = {
+    "category": "categories",
+    "material": "materials",
+    "color": "colors",
+    "size": "sizes",
+    "brand": "brands",
+    "budget": "price",
+    "use_case": "use_cases",
+}
+
+
 @dataclass
 class ClarificationDecision:
     attribute: str | None
@@ -192,6 +208,9 @@ class ClarificationPolicy:
         floor = self.config.attribute_prior_floor
         decay = self.config.repeat_ask_decay
 
+        disclosed_decay = getattr(self.config, "disclosed_ask_decay", 1.0)
+        filled = set(state.constraints.filled_slots())
+
         best_attribute, best_gain = None, 0.0
         for attribute in ALLOWED_ATTRIBUTES:
             if attribute in state.exhausted_attributes:
@@ -205,6 +224,16 @@ class ClarificationPolicy:
             # ask still has value -- just less of it.
             repeats = state.asked_attributes.count(attribute)
             gain = answer_probability * informativeness * (decay ** repeats)
+            # An attribute answered by *disclosure* rather than by an ask gets
+            # no `repeats` decay at all, because nothing counts it -- which is
+            # how the agent can ask "do you have a material preference?" on the
+            # turn right after the customer stated their material. Same
+            # diminishing-returns shape as a repeat ask, on the same grounds:
+            # the card can hold a second span of the same class, so this is
+            # graded, not a skip. 1.0 is inert; 0.0 makes it a hard skip.
+            slot = _ANSWER_SLOT.get(attribute)
+            if slot is not None and slot in filled:
+                gain *= disclosed_decay
             if gain > best_gain:
                 best_attribute, best_gain = attribute, gain
         return best_attribute, best_gain

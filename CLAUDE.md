@@ -84,13 +84,19 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.942939`, HR@10 = 1.000, MRR 0.902464,
-MTTC 2.390 — measured 2026-08-31 on the `arwen` + `investigation` merge with
-the unmodified CLI evaluator over all 200 public sessions.** 168 of 200 at
-rank 1, zero misses, 56/56 tests. Re-verified byte-identical after the same-day
-post-merge cleanup and the `recommend_on_ask_turns` removal, both of which are
-behaviour-preserving by construction — see "What was found". `config/tuned.json`
-lost the `recommend_on_ask_turns` key in that removal; no value changed.
+**Live score: `TechnicalScore = 0.942739`, HR@10 = 1.000, MRR 0.902464,
+MTTC 2.400 — measured 2026-09-01 with the unmodified CLI evaluator over all
+200 public sessions.** Zero misses, 60/60 tests.
+
+**This is 0.942939 minus 0.0002, deliberately.** `disclosed_ask_decay: 0.0`
+was adopted on product grounds against a known, measured score loss — see the
+top "What was found" entry before treating this as a regression to chase.
+MRR is byte-identical to the 0.942939 build; the entire delta is one extra
+turn of MTTC on one session.
+
+*The 0.942939 lineage below is the same build with `disclosed_ask_decay: 1.0`,
+which reproduces it byte-identically and is the documented rollback.* Measured
+2026-08-31 on the `arwen` + `investigation` merge: 168 of 200 at rank 1.
 
 **The two recommendation-hold gates were built in parallel and compound.**
 They read different signals and neither supersedes the other, so
@@ -216,13 +222,38 @@ coincidence: those sessions cannot register a hit before their override turn
 never bind for them. If a future threshold change moves this row, the gate
 is firing somewhere it should not.
 
-**Rank distribution, superseded by the gate — recompute before quoting.**
-The pre-gate distribution was 125 rank 1 / 31 rank 2 / 35 ranks 3-5 / 9
-ranks 6-10. The gate moved **39 sessions up and 1 down, losing none**, so
-those counts no longer describe the live build; the gated run's
-per-session `best_rank`s are in `c:/tmp/out_conf_gate.json` (scratch,
-regenerable) rather than restated here, because this file has twice carried
-a distribution that a later change silently invalidated. With HR@10
+**Rank distribution, MEASURED on the live build (2026-09-01), replacing the
+"recompute before quoting" placeholder this section used to carry:**
+
+| rank | sessions |
+|---|---|
+| 1 | **168** |
+| 2 | 18 |
+| 3-5 | 12 |
+| 6-10 | 2 |
+| miss | **0** |
+
+**Per scenario, also the live merged config** — this replaces the
+single-gate table above, which was the best available until now:
+
+| scenario | n | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| buying | 80 | 1.0000 | 0.905625 | 1.825 |
+| browsing | 80 | 1.0000 | 0.910952 | 2.400 |
+| intent_override | 30 | 1.0000 | 0.880556 | 3.733 |
+| boundary | 10 | 1.0000 | 0.875000 | 3.000 |
+
+**Browsing is no longer the weakest scenario — it is now the strongest on
+MRR** (0.9110 against buying's 0.9056), which reverses a claim this file has
+carried since the beginning and which the Roadmap still repeats. The
+recommendation-hold gates did that: browsing openers disclose nothing, so
+they were exactly the sessions locking in a bad rank on turn 1. `boundary`
+(n=10) and `intent_override` are now the weak rows, and both are structural —
+override sessions cannot register a hit before turn 3-4 by construction.
+
+*The pre-gate distribution, for the chain: 125 rank 1 / 31 rank 2 / 35 ranks
+3-5 / 9 ranks 6-10. The confidence gate moved 39 sessions up and 1 down,
+losing none.* With HR@10
 saturated at 1.000, remaining headroom is still MRR plus efficiency, but
 efficiency is now the *spent* term rather than the free one — see the gate
 entry in "What was found" for the ceiling this leaves.
@@ -376,7 +407,7 @@ python -m tools.why_lost --trace c:\tmp\features.jsonl --ranks 3,4,5 --top 30
 python -m tools.tune --output c:\tmp\cfg.json --report c:\tmp\tuning_report.json
 
 # tests
-python -m unittest discover -s tests    # 38 tests (35 copilot + 3 evaluator)
+python -m unittest discover -s tests    # 60 tests
 ```
 
 **Tracing:** set `trace_path` in the config to emit `features.jsonl` (~115k
@@ -392,110 +423,95 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
-**REMOVED: the `recommend_on_ask_turns` flag. Asking and answering on the same
-turn is now unconditional in code (2026-08-31, per He Jinhong: "am i supposed
-to turn it on or off", then "just implement it into the code directly, no more
-flags since there is no decision to be made").** Measured first, then deleted —
-the measurement is what established there was no decision left to represent.
-Same treatment the conjunctive injection got, for the same reason.
+**ADOPTED ON PRODUCT GROUNDS, NOT SCORE: `disclosed_ask_decay: 0.0` — never
+ask about an attribute the customer has already disclosed. Costs −0.0002
+(0.942939 → 0.942739) and was knowingly taken (2026-09-01, per arwenalyssa,
+from a demo screenshot of the agent asking "Do you have a material
+preference?" on the turn right after the customer said "polyester": "can we
+fix this now", then, after being shown the measured cost and told it was a UX
+call rather than a ranking one: "turn it on. i think it's important, even
+though now it's reduced ever so slightly").**
 
-| | score | HR@10 | MRR | MTTC | eff |
-|---|---|---|---|---|---|
-| `true` (live) | **0.942939** | 1.0000 | 0.902464 | 2.390 | 0.861 |
-| `false` | 0.842339 | 0.9950 | 0.950464 | 8.015 | 0.298 |
+**This is the first change in the project adopted against a measured score
+loss, so the reasoning matters more than usual.** The regression is real but
+two orders of magnitude under single-run SE (~0.029) — unmeasurable on this
+set and on the private 800 alike. What it buys is not a metric: an agent that
+asks about material immediately after the shopper stated their material reads
+as not listening, and the Buyte demo puts that failure in front of judges.
+**Do not "optimise this back" by reverting it — the cost was priced and
+accepted.** Rollback, if the private-set margin ever gets tight enough to care
+about 0.0002, is `disclosed_ask_decay: 1.0`, verified byte-identical at
+0.942939.
 
-**The shape is the interesting part, and it is a clean reproduction of the
-older finding at higher resolution: MRR *rises* (+0.048, 18 sessions better,
-0 worse) and the score still collapses.** Decomposed: MRR +0.0144, HR@10
-−0.0025, efficiency **−0.1124**. Silence on every ask-turn drags MTTC 2.390 →
-8.015 and efficiency 0.861 → 0.298 — the efficiency term outweighs the rank
-gain roughly 8:1, and one session is lost outright.
+*The rest of this entry is the measurement that preceded the decision, and it
+argues against adoption on score grounds. Both halves are true; the call was
+made with the numbers in hand, not in spite of them.*
 
-**Why `false` is not a position worth keeping selectable, even though
-withholding demonstrably helps ranks:** the two adopted gates already buy that
-same MRR *selectively* — they hold only when the customer has disclosed nothing
-(`recommend_min_spans`) or the ranker has not committed
-(`min_recommend_confidence`), and both release by turn 3-4. Suppressing a list
-*because a question was asked* is the blunt version of the same idea stacked on
-top of the precise one. **Do not rebuild this as a way to raise MRR; the MRR
-gain is real and is not the problem.**
+**The gap is real in code.** `clarify.py:_best_attribute()` skips an attribute
+only if it is in `state.exhausted_attributes` (the customer explicitly refused
+it) and damps it only by `repeat_ask_decay ** state.asked_attributes.count(...)`.
+Neither counts an attribute *answered by disclosure*, so a slot filled from the
+customer's own opening line carries full expected gain and can be asked about
+immediately.
 
-**Deleting it also closed a tooling hazard for good, which is the second reason
-it went rather than being pinned to `True`.** `tools/offline_eval.py` could not
-mirror this term — it keyed off the clarification decision, which a trace does
-not record — so a single config edit could have made every replay silently
-optimistic while still reporting a clean agreement count. With the flag gone,
-**every suppressor in `Agent._respond` is now mirrored**, and the invariant is
-written into the tool's docstring: do not add a suppressor that reads something
-the trace does not carry.
+**Measured before building anything, and the probe is the finding.** Instrumented
+live run over all 200 sessions (patching `ClarificationPolicy.decide` and
+`local_evaluator.customer_reply` at runtime; the evaluator file is untouched,
+and the run reproduces 0.942939 exactly):
 
-**Removed from `config/tuned.json` as well as from `DialogueConfig`, and that
-matters:** `config._build` silently ignores unknown keys, so a stale
-`"recommend_on_ask_turns": false` left in the JSON would have looked like a
-setting and done nothing.
+| | count |
+|---|---|
+| asks issued | 478 |
+| asks that reached `customer_reply` | 248 |
+| replies of "I don't have an additional preference for X" (wasted) | **6** |
+| asks where the attribute's slot was already filled | **2** |
+| …of those, that elicited NEW information | **2** |
+| …of those, that were wasted | **0** |
 
-**Verification (mandatory, since this edits the live submission config):**
-unmodified CLI evaluator before and after the removal is **byte-identical on
-every metric** — 0.942939 / HR@10 1.0000 / MRR 0.902464 / MTTC 2.390 /
-efficiency 0.861 — and **200/200 sessions agree on `best_rank` between the two
-runs**, not merely in aggregate. `tools.offline_eval` against a fresh
-98,927-row trace: **200 agree, 0 disagree**, `target_never_in_pool` 0. 56/56
-tests. `results.json` untouched; every run to scratch paths per Critical
-rule 1.
+**Both already-filled asks were productive.** The evaluator hands over at most
+two spans per reply (`local_evaluator.py:181`) and an intent card can hold
+several of the same class, so "the slot is filled" does not mean "the card is
+empty" — asking `material` a second time pulled out the second material span.
+And **5 of the 6 genuinely wasted asks are `feature`**, the evaluator's
+catch-all class, which has no structured slot and is therefore unreachable by
+any filled-slot test. The whole defect on this set is **one** wasted turn.
 
-**Post-merge cleanup of the two recommendation gates — behaviour-preserving,
-and it uncovered a broken validation gate (2026-08-31, per He Jinhong: "can we
-fix this, clean it up").** `7b97272` merged the `arwen` disclosure gate and the
-`investigation` NQC gate. Both survived intact and the merged score is real —
-**re-measured here at 0.942939 on the unmodified CLI evaluator, byte-identical
-to the merge's own claim** (HR@10 1.0000, MRR 0.902464, MTTC 2.390). But the
-merge left three collisions and one silent defect.
+**Built anyway as a graded lever, swept, rejected.** `DialogueConfig.disclosed_
+ask_decay` (default `1.0` = inert; `0.0` = hard skip) multiplies the gain when
+`_ANSWER_SLOT[attribute]` is in `state.constraints.filled_slots()`. Graded
+rather than a skip precisely because of the two-productive-asks result.
+Unmodified CLI evaluator, scratch configs, `stratified_halves(seed=7)`:
 
-**The defect, which is the reason this entry exists: `tools/offline_eval.py`
-mirrored only ONE of the two live gates.** It reproduced
-`min_recommend_confidence` and had no notion of `recommend_min_spans`, which is
-live at `1`. The two gates release on different turns — the span gate holds to
-`recommend_max_wait: 4`, the NQC gate to `recommend_turn_fallback: 3` — so at
-turn 3 with nothing disclosed the live agent stays silent and the replay
-recorded a hit. **Measured on the fresh trace: 192 agree / 8 disagree, replayed
-MRR 0.876048 against live 0.902464.** The replay was reporting the
-*investigation-alone* MRR to six decimals while claiming to describe the merged
-build — the most dangerous shape of wrong, since the number looks familiar.
-Fixed: `Agent._log` now writes `spans` into every trace row (it was not
-recoverable from a trace at all), `recommendations_withheld` mirrors both gates
-as the same OR, and `main` warns loudly when the config uses the span gate but
-the trace predates the field. **After: 200/200 agree, MRR matching live
-exactly.** Traces written before today cannot validate this build — regenerate
-rather than trusting an old one. **Every suppressor in `Agent._respond` is now
-mirrored** — the one that could not be (`recommend_on_ask_turns`, which keyed
-off the clarification decision a trace does not record) was deleted the same
-day; see the entry above.
+| decay | full 200 | HR@10 | MRR | MTTC | fold A | fold B |
+|---|---|---|---|---|---|---|
+| **1.0 (inert, live)** | **0.942939** | 1.0000 | 0.902464 | 2.390 | 0.940929 | 0.944950 |
+| 0.45 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
+| 0.2 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
+| 0.0 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
 
-**This is the third time a replay tool has silently drifted from the code it
-replays** (`ReplayScorer`'s stale unknown-penalty loop; `offline_eval` missing
-the NQC gate entirely, caught by the PRD's §6.4 warning; now this). The pattern
-is always the same: a gate is added to `agent.py` and the mirror is updated for
-*that* gate only. **A merge that brings in a second gate needs the mirror
-re-checked even when neither branch touched the tool** — neither did here, and
-that is exactly why it broke.
+Default-off is byte-identical to the live score. **0.45, 0.2 and 0.0 are
+identical to each other**, which is itself informative: the lever flips exactly
+one decision on the whole set at any strength, so there is no threshold to
+tune. MRR is byte-identical everywhere, fold B is byte-identical everywhere,
+and the entire −0.0002 is one extra turn of MTTC on one session. −0.0002 is two
+orders of magnitude under single-run SE and is not a *measurable* regression —
+but there is no measurable gain to weigh against it either, and the mechanism
+says why: the lever can only fire where the ask was working.
 
-**The cleanup itself, all behaviour-preserving.** (1) Deleted
-`DialogueConfig.recommend_min_confidence`. It and `min_recommend_confidence`
-were the same NQC statistic under near-identical names, and the deleted one had
-**no turn cap** — `recommend_max_wait` bounds only the span clause — so setting
-the wrong name gave an unbounded hold that converts a hit into a miss, spending
-the 0.5-weighted term to save the 0.2-weighted one. It was set nowhere and the
-arwen entry below had already found it "unusable as scaled", so removal costs
-nothing. (2) Removed `ClarificationPolicy.confidence()`, the public accessor
-added for that one clause — the single-`nqc`-definition invariant now has a
-single name on it too. (3) Collapsed the two gate blocks in `agent.py` into one
-`withhold` expression with named terms (`starved`, `unconvinced`,
-`asked_instead`) and one `dialogue` binding instead of two, ordered so `nqc` is
-only called once the cheap tests pass.
+**Status: ADOPTED at `0.0` in `config/tuned.json`** (the hard skip, since every
+non-inert value scores identically — there was no reason to pick a softer one).
+Live score is now **0.942739**. 60/60 tests (56 + 4 pinning that `1.0` is a
+true no-op, that `0.0` is a hard skip, and that `style`/`feature`/`other` stay
+askable forever because "already answered" is unobservable for them).
+`results.json` untouched; every run went to a scratch path per Critical rule 1.
 
-**Verification: 0.942939 unchanged, 56/56 tests, offline_eval 200/200.**
-`results.json` untouched; every run to scratch paths per Critical rule 1.
-`config/tuned.json` not edited — the removed field was never in it.
+**Reasoning error worth keeping:** the first diagnosis of this (written from
+reading `clarify.py` alone) asserted the redundant ask "wastes one of ten
+turns". True for one session in 200; false as a general claim, and the opposite
+of true for the two sessions where the mechanism actually fires. *"The gate is
+missing"* and *"adding the gate improves an outcome"* are different claims —
+the same error this file already records against the `injection_min_spans`
+probe, recurring within the day.
 
 **ADOPTED: confidence-gated recommendation hold. 0.909328 → 0.936614,
 fold B +0.0259 (2026-08-31, per arwenalyssa: "can u do build the features

@@ -1,7 +1,9 @@
-# Shopping Copilot — Conversational Search Agent
+# Buyte — Conversational Search Agent
 
 **A shopping agent that asks better questions, remembers what you said, and
 ranks 50,000 products by what you actually meant.**
+
+TechJam 2026 · Track 4: AI Conversational Search and Recommendations
 
 ---
 
@@ -26,13 +28,16 @@ dialogue failure.
 **That reading was half wrong, and finding out how was the most useful thing
 that happened to us.** Ranking is where the score is *counted*, but on this
 benchmark dialogue is where it is *created*: without a question, no new
-information arrives, so there is nothing better to rank. More below.
+information arrives, so there is nothing better to rank. And a third thing
+turned out to matter more than either — *when* you show the list at all. All
+three findings are below.
 
 ## What we built
 
-A per-turn pipeline, all in-memory, no vector database, no LLM:
+A per-turn pipeline, all in-memory, no vector database, no LLM, no network call:
 
-`parse → route intent → retrieve (lexical + semantic, fused) → rerank → clarify`
+`parse → route intent → retrieve (lexical + semantic, fused, plus conjunctive
+injection) → rerank → ask, hold, or recommend`
 
 **Utterance parsing and state.** A `ShoppingState` accumulates slots across
 turns and rewrites them on override. Parsing is deliberately not bag-of-words.
@@ -40,7 +45,10 @@ On the opener *"I'm looking for Jewelry Necklaces. A key requirement is:
 Material:alloy"*, a bag-of-words query scores "key" as a content term and
 returns key-pendant necklaces — the true target fell outside the top 200
 entirely. Each turn is split into a category phrase, constraint spans, and
-control signals, and only content reaches the retriever.
+control signals, and only content reaches the retriever. An override *demotes*
+the retracted constraint rather than deleting it: a withdrawn preference must
+never again be checked for satisfaction, but its words still describe the
+region of the catalog in play.
 
 **Retrieval.** Five per-field BM25 indexes — title, features, categories,
 description, store — never concatenated, because a term matching in a 12-token
@@ -49,23 +57,39 @@ Queries are field-routed: the category phrase goes at `categories` and `title`,
 quoted constraint spans at `features`. A character-n-gram semantic route runs
 alongside, fused by convex combination.
 
-**Feature-based reranking.** 30 features per candidate — per-field BM25,
-semantic similarity, phrase/bigram overlap, term coverage, catalog priors, and
-three-way constraint satisfaction — combined by a weighted linear model and
-ordered deterministically.
+On top of that, a **conjunctive exact-substring injection**: any product whose
+text contains *every* live constraint span verbatim enters the candidate pool
+regardless of its BM25 rank. This is the route that retrieval depth alone
+cannot provide — we measured pool recall across the full `per_field_depth` ×
+`candidate_depth` grid and found it saturates completely between 600 and 800,
+with 800 → 50,000 buying **0.0 percentage points**. The injection took
+`target_never_in_pool` from 1 to **0**: every public target now reaches the
+ranker.
+
+**Feature-based reranking.** 40 features per candidate — per-field BM25,
+semantic similarity, phrase/bigram overlap, term coverage, catalog priors,
+three-way constraint satisfaction, per-dimension unknown-penalty indicators as
+first-class columns, and `span_all` (does this candidate satisfy *every*
+disclosed constraint span, not just some of them) — combined by a weighted
+linear model, ordered deterministically with ties broken on `parent_asin`.
+
+**Ask, hold, or recommend.** An EAR-style gate decides whether a question is
+worth a turn. A second, independent gate decides whether to show a
+recommendation list *at all* this turn — see the finding below, which is where
+most of our final score came from.
 
 ## The findings that made the difference
 
-**Clarification is the system, not a refinement to it.** Removing it costs
-−0.4473 TechnicalScore, an order of magnitude more than any other component. Our
-first working build scored 0.3167 because the clarification gate was being
+**1. Clarification is the system, not a refinement to it.** Removing it costs
+−0.4473 TechnicalScore, an order of magnitude more than any other component.
+Our first working build scored 0.3167 because the clarification gate was being
 handed the ten returned recommendations instead of the ranked candidate pool, so
 its "is the candidate space still large enough to narrow?" test rejected every
 turn and the agent never asked anything. Browsing sessions stalled with the
 simulated customer repeating *"Ask me about one specific attribute"* to an agent
 that never did. Fixing that one plumbing bug moved us from 0.3167 to 0.7641.
 
-**Asking well matters as much as asking.** Information gain computed over
+**2. Asking well matters as much as asking.** Information gain computed over
 catalog fields picks `category` and `brand` — they partition the candidate pool
 beautifully, and this customer answers them *never*. So we measured disclosure
 per attribute across all 200 sessions instead of assuming it:
@@ -85,11 +109,68 @@ Expected gain became `P(answered) × uncertainty removed`, with the first term
 measured. A question the customer cannot answer wastes one of ten turns however
 elegantly it would have split the catalog.
 
-**Target products are a popularity-biased subpopulation.** Median review count
-is 6,846 for targets versus 12 for a random catalog row — AUC 0.956 on that
-single feature. This is not a discovery about shoppers; it is a property of how
-the benchmark was constructed. Targets are sampled from a 5-core leave-last-out
-split of real purchase records, and real purchases concentrate on popular items.
+**3. The evaluator stops at the first hit — so *when* you answer decides your
+rank, and this was our single largest gain.** `local_evaluator.py` ends a
+session the first turn its target appears in the top 10, which means the rank
+shown on that turn is final even if the very next turn would have been better.
+Measured directly: **45 of 75 sub-rank-1 sessions locked in on turn 1**, before
+the customer had disclosed anything beyond a category name — and every one of
+them reached rank 1 by turn 2 or 3 when replayed past their lock-in turn. The
+exchange rate strongly favours waiting: one extra turn costs ~0.0001 of score
+via Efficiency, while a rank 2→1 recovery pays ~0.00075 — **7.5× more**.
+
+So the agent holds the list back on turns that cannot support it. Two gates do
+this, built independently, and they compound because they read different
+signals: one asks *has the customer said anything concrete yet* (at least one
+disclosed constraint span), the other asks *has the ranker committed* (Normalized
+Query Commitment, Shtok et al. 2009, over the ranked pool). Either can fail on
+a turn the other passes.
+
+| configuration | TechnicalScore | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| neither gate | 0.909328 | 1.0000 | 0.756095 | 1.875 |
+| evidence gate alone | 0.928002 | 1.0000 | 0.833673 | 2.105 |
+| confidence gate alone | 0.936614 | 1.0000 | 0.876048 | 2.310 |
+| **both** | **0.942939** | **1.0000** | **0.902464** | 2.390 |
+
+*(The shipped config then spends 0.0002 of that on behaviour rather than
+score — see "A deliberate regression" below.)*
+
+**We want to name this one honestly: part of that gain is a scoring artifact.**
+Real shoppers do not vanish the moment they see a decent list — shown something
+mediocre they keep talking, and you get another attempt for free. First-hit-break
+is a measurement convention for time-to-first-success, not a model of customer
+patience. Optimising against it *is* the task, but it is not evidence that users
+would prefer an agent that stays quiet. That is exactly why the shipped
+confidence threshold sits at the conservative low edge of its measured plateau
+(τ = 0.054) rather than at its highest-scoring point (τ = 0.085, which scores
+0.941314 on the full set but gains nothing on the held-out fold).
+
+**4. Rank 2 was read by hand, product by product — and it closed off an entire
+class of future work.** We read all 30 rank-2 sessions against exactly what the
+customer had said at the turn that scored. In **0 of 30** did the ranker hold
+separating information and still get the order wrong. 27 were separable only
+with more disclosure than had yet arrived (a timing problem — finding 3), and 3
+were genuine ties: two listings identical on every disclosed constraint, where
+no feature, no weighting and no human reading the text could tell them apart.
+
+This retired two things on evidence. First, the theory that popularity signal
+was drowning constraint evidence — winner-is-more-popular was a coin flip
+(15/30), and in several pairs the target is far more popular and loses anyway.
+Second, **seven separate attempts at a learned reranker**: five linear
+formulations, a regularised sklearn logistic regression, and a LightGBM
+LambdaMART. None beat the tuned linear model held out. The best (LambdaMART)
+reached −0.0080 — a tie — and eight configurations spanning `num_leaves` 2–15
+and 15–200 trees produced a flat-to-worse curve, which is the signature of no
+remaining signal rather than of undertuning. The feature vector already contains
+what a rank-2 pair needs; there was nothing left to reweight.
+
+**5. Target products are a popularity-biased subpopulation.** Median review
+count is 6,846 for targets versus 12 for a random catalog row — AUC 0.956 on
+that single feature. This is not a discovery about shoppers; it is a property of
+how the benchmark was constructed. Targets are sampled from a 5-core
+leave-last-out split of real purchase records, and real purchases concentrate on
+popular items.
 
 **We use it as a soft prior, never a filter.** Pruning to 25+ reviews would keep
 97.5% of targets and cut the search space to 37.9% — but 5% of targets live below
@@ -104,7 +185,31 @@ BM25 baseline — because it is query-blind, returning identical Crocs and Hanes
 boxer briefs to every customer. The lift comes from combining relevance with the
 prior, and neither half works alone.
 
-Two other measurements shaped the build:
+**6. Two correctness bugs found by auditing the catalog, not the leaderboard.**
+Both were found by a "own-goal" test — score every one of the 50,000 rows against
+constraints drawn from its *own* listing, and see how often a product violates
+itself:
+
+- **Gender hierarchy.** `kids` was coded as a sibling of `boys`/`girls` rather
+  than their parent, so a customer saying "toddler" scored every boys'/girls'
+  listing as VIOLATED — including the listing whose own category path produced
+  the word "kids". 506 of 50,000 rows (1.01%) were taking that own goal. Fixed
+  as a hierarchy; own-goal rate down to 180/50,000.
+- **Brand false positives.** Single-word brand matching against 19,855 catalog
+  store names fires on ordinary listing boilerplate. Measured live at the
+  lock-in turn: a brand was extracted in 66 of 200 sessions and **62 were
+  wrong** — driven by `wash`, `sole`, `hand`, `machine` out of "Machine Wash"
+  and "Rubber sole". We deliberately did *not* hand-write a blocklist (it would
+  fit these 200 sessions and not generalise); instead we gate single-word
+  matches by measured catalog text-commonness, where real brands and boilerplate
+  separate by two orders of magnitude (`skechers` 0.0077 vs `wash` 0.317).
+
+**Both measured exactly zero effect on the public 200, and we adopted them
+anyway.** That was the pre-registered pass condition, not a disappointment: the
+private set is 800 unseen sessions, a ~0.6%-of-rows defect is ~5 sessions there,
+and a fix tuned to make a public-set number move would be worth negative value.
+
+Two properties of the data shaped everything else:
 
 - **The catalog is sparse where the problem statement assumes it is rich.**
   Price is null on 78.9% of rows; `Color` exists on 4.9% of products, `Material`
@@ -118,27 +223,65 @@ Two other measurements shaped the build:
 
 ## Results
 
+Measured on the 200 public development sessions with the unmodified official
+evaluator (`evaluator/local_evaluator.py`).
+
 | Configuration | HR@10 | MRR | MTTC | TechnicalScore |
 |---|---|---|---|---|
 | Official baseline | 0.125 | 0.068 | 9.81 | 0.1067 |
-| Ours — defaults | 0.885 | 0.554 | 3.23 | 0.7641 |
-| **Ours — tuned** | **0.910** | **0.565** | **2.98** | **0.7848** |
+| Ours — default weights | 0.885 | 0.554 | 3.23 | 0.7641 |
+| **Ours — shipped (`config/tuned.json`)** | **1.000** | **0.902464** | **2.400** | **0.942739** |
 
-7.4× the baseline TechnicalScore. Turns-to-conversion down from 9.81 to 2.98.
-Measured on the 200 public sessions with the unmodified official evaluator.
+**8.8× the baseline TechnicalScore, zero misses across all 200 sessions**, and
+turns-to-conversion down from 9.81 to 2.40.
 
-Defaults already reach 0.7641 — tuning contributed 0.021, and only 0.011 of that
-survived to a held-out half of the sessions. Most of the gain is architectural
-rather than fitted, which is the main reason we expect it to hold on the private
-set.
+### A deliberate regression
 
-### What each component is actually worth
+The shipped score is 0.0002 *below* our best measured configuration, and that
+was a choice. `disclosed_ask_decay: 0.0` stops the agent asking about an
+attribute the shopper has already disclosed — being asked "do you have a
+material preference?" one turn after saying "polyester" reads as an agent that
+is not listening.
 
-Every row disables exactly one thing, full 200 sessions:
+We measured it first, and the measurement argued against it: across 200
+sessions the gate fires on only 2 asks, and **both of them were productive**,
+because the simulator discloses at most two constraint spans per reply and an
+intent card can hold several of the same class. Enabling it costs 0.942939 →
+0.942739, identical at every strength from 0.45 down to 0.0, entirely as one
+extra turn of MTTC on one session — MRR is byte-identical and the held-out
+fold does not move at all.
+
+We took it anyway. 0.0002 is two orders of magnitude below this set's ~0.029
+standard error, so it is not a difference the benchmark can even resolve,
+whereas an agent that visibly ignores what the shopper just said is a defect
+any person can see in one turn. We would rather report that trade honestly
+than quietly keep the higher number.
+
+**Read that as in-sample.** Roughly 36+ configurations have now been scored
+against these same 200 sessions, so we validate every change on
+`stratified_halves(seed=7)` and quote the conservative held-out fold: the
+evidence gate is +0.0193 there and the confidence gate +0.0259. The
+*combination* has not itself been fold-split, so 0.942939 is the honest
+full-set number, not a private-set forecast. Single-run standard error on 200
+sessions is ~0.029; the private 800 has roughly half that.
+
+We also measured the ceiling this leaves, because it changes what is worth
+attempting next. MRR wants more disclosure and MTTC wants fewer turns, and
+because the evaluator breaks on first hit they are in *direct* opposition:
+even the physically impossible "all information disclosed for free on turn 1"
+row tops out at 0.9585, and realistic perfect play on disclosure timing is
+**~0.947–0.954**. We had been carrying an internal target of 0.97; that
+measurement retired it.
+
+### What each component is worth
+
+Each row disables exactly one thing. **This table is measured against the
+pre-tuning default-weights build (0.7641), not the shipped 0.9429** — it shows
+relative contribution under that build and has not been regenerated since.
 
 | component removed | TechnicalScore | delta |
 |---|---|---|
-| *full system* | 0.7641 | — |
+| *full system (pre-tuning)* | 0.7641 | — |
 | clarification policy | 0.3167 | **−0.4473** |
 | candidate depth 200 → 20 | 0.7323 | −0.0318 |
 | popularity priors | 0.7410 | −0.0230 |
@@ -150,10 +293,12 @@ Every row disables exactly one thing, full 200 sessions:
 | profile personalisation | 0.7650 | +0.0010 |
 | *added:* MMR diversity | 0.7641 | +0.0000 |
 
-Two components measurably do **not** earn their place — profile personalisation
-and per-field lexical weighting both score marginally better when removed. Both
-are inside noise, so it is not a finding in either direction, but nothing in our
-results argues for them and we would rather report that than imply otherwise.
+Two components measurably did **not** earn their place at that point — profile
+personalisation and per-field lexical weighting both scored marginally better
+when removed. Both are inside noise, so it is not a finding in either direction,
+but nothing in our results argued for them and we would rather report that than
+imply otherwise. MMR measured at exactly +0.0000 and is disabled in the shipped
+config.
 
 We also learned a methodology lesson worth passing on: we first ran this table
 on an 80-session subset and three readings were wrong, including one component
@@ -169,17 +314,40 @@ sample-efficient — one parameter, tunable on a small set. With 200 sessions,
 sample efficiency decided it. We fuse two routes, staying inside the regime that
 paper studied.
 
-**The EAR clarification gate** (Lei et al., 2020): ask only when the candidate
-space is small enough, the question still carries information gain against user
-patience, and the recommender is not yet confident. We did *not* implement the
-RL policies that succeeded it (SCPR, UNICORN) — they assume clean per-item
-attribute sets, and our audit showed this catalog has none.
+**The EAR clarification gate** (Lei et al., WSDM 2020, arXiv 2002.09102): ask
+only when the candidate space is small enough, the question still carries
+information gain against user patience, and the recommender is not yet
+confident. We did *not* implement the RL policies that succeeded it (SCPR, arXiv
+2007.00194; UNICORN, arXiv 2105.09710) — they assume clean per-item attribute
+sets, and our audit showed this catalog has none.
+
+**Confidence, quantified: Normalized Query Commitment** (Shtok et al., 2009).
+The statistic EAR treats qualitatively — "is the recommender confident" — is
+computed explicitly as `std(top-10 scores) / |top|` and used both to gate asking
+and to gate showing a list. One caution we recorded while building it: *a gate
+set against the wrong empirical range is silently unreachable rather than loudly
+wrong.* Our ask gate sat at 0.82 while the entire observed NQC range is
+[0.011, 0.194] — it had never once fired, and nobody noticed until the range was
+measured.
+
+**Withholding results while asking: the literature disagrees with itself.** One
+[empirical study of clarifying-question e-commerce systems](https://arxiv.org/pdf/2008.00279)
+found users tolerate 11.4 questions per product, so turn budget is not the
+binding constraint. But [three controlled experiments on withheld information](https://pmc.ncbi.nlm.nih.gov/articles/PMC11008880/)
+(n = 1,811 / 905 / 801) found conversational withholding scores *worse* than the
+same withholding in an ordinary UI — mitigated specifically by showing results
+*alongside* the question, which a hold gate by definition stops doing. We built
+the gate because the effect is measurable per-session rather than
+population-average, and we set it at the conservative edge of its plateau
+because of this literature, not despite it.
 
 **Tree ensembles for tabular ranking.** Grinsztajn et al. (arXiv 2207.08815)
 find GBDTs frequently outperform deep models at this data scale, and that
-feature engineering rather than model class sets the ceiling — which is why we
-treated the shopping-specific features as the contribution rather than the
-model. We did not ship a GBDT; see Limitations.
+feature engineering rather than model class sets the ceiling. We tested that
+claim directly rather than citing it: LightGBM `lambdarank` was measured against
+six other learned formulations and none beat the tuned linear model held out —
+consistent with the paper's point that the ceiling is set by features, not model
+class, once the features stop changing.
 
 **Anchor-based CRS framing.** PSCon (arXiv 2502.13881) notes e-commerce
 conversational recommendation is typically anchor-based, simulated from
@@ -192,9 +360,6 @@ the reason slot-based routing beats free-form NLU here.
 - Python 3.12 virtual environment (`venv`)
 - Git / GitHub for version control
 
-<!-- If the competition expects disclosure of AI coding assistants, add it here.
-     This is a disclosure decision for the team to make, not a technical one. -->
-
 ## APIs used
 
 **None.** The agent makes no external API calls. All ranking is deterministic
@@ -202,8 +367,9 @@ and runs in-memory, so there is no per-session token cost, no rate limit, and no
 network dependency at evaluation time. The evaluator's reported token usage for
 a full 200-session run is 0 prompt / 0 completion.
 
-Disclosure figures: $0.00 estimated cost, 0 tokens, ~20 s one-off index build,
-89 ms median per-turn latency (122 ms p95), ~110 s for the full 200-session run.
+Disclosure figures: **$0.00 estimated cost, 0 tokens.** A one-off index build
+takes ~20 s; a full 200-session evaluation run takes ~3–4 minutes on a laptop
+(~1 s per session, dominated by the conjunctive-injection catalog scan).
 
 ## Libraries and frameworks
 
@@ -217,7 +383,14 @@ Modules used: `json`, `re`, `math`, `array`, `collections`, `dataclasses`,
 
 The BM25 inverted indexes, the character-n-gram semantic index, the fusion
 layer, the feature extractor, the linear ranker, and the coordinate-ascent tuner
-are all implemented from scratch.
+are all implemented from scratch. 60 unit tests cover the agent and our reading
+of the evaluator.
+
+**The Buyte demo UI is separate and does not touch the graded path.**
+`frontend/` is an optional presentation layer — a FastAPI wrapper plus a React
+storefront that replays real evaluator sessions turn by turn — calling the same
+unmodified `starter.agent.Agent`. It has its own dependencies and its own
+deployment, and contributes nothing to `TechnicalScore`.
 
 ## Datasets and assets
 
@@ -229,53 +402,44 @@ are all implemented from scratch.
 
 ## What we would do with more time
 
-A prioritised roadmap with the measurement behind each item is in
-`docs/pending.md`.
-
-**Make the intent router actually do something.** It is implemented and scores
-every turn, but its only consumer is MMR diversity for browsing sessions, and
-MMR measured at exactly +0.0000 so it is disabled. The router therefore computes
-a label that reaches the trace log and nothing else. Having the route select
-genuinely different retrieval weight profiles is the cleanest unfinished piece
-of our design, and we would rather say so than describe a routing behaviour we
-did not ship.
-
-**MRR is where the headroom is.** At 0.910 HR@10 and 0.565 MRR we find the
-target in 91% of sessions but at mean rank 3.05 — 90 of 182 hits land at rank 1,
-and 66 land at rank 3 or worse. The remaining MRR is worth 0.131 of
-TechnicalScore, more than the remaining HR@10 and Efficiency headroom combined.
-A LightGBM `lambdarank` model trained on logged sessions weights each pairwise
-swap by its effect on the ranking metric, concentrating learning on exactly
-those top positions. The feature vector, a trace hook that logs replayable
-feature rows, and a `ScoringModel` seam are already in place for it.
+**Push the recommendation hold past the conservative edge.** The gap between the
+shipped threshold (0.9366 at τ = 0.054) and the sweep's best public-set point
+(0.9413 at τ = 0.085) is real, but it lives entirely in the fitted fold — the
+held-out fold is tied. We would take that on private-set feedback or as a
+per-intent threshold, not on the public set's say-so.
 
 **Bridge the attribute vocabulary gap.** The nine profile `preference_tags` are
 abstract — fit, material, comfort, style, durability, performance, warmth,
-weather, general shopping — and map onto no catalog field. Our profile affinity
-feature ablates to +0.0010, i.e. inert. Learning tag-to-product affinities from
-the labelled sessions is the most promising direction we did not get to.
+weather, general shopping — and map onto no catalog field. Learning
+tag-to-product affinities from the labelled sessions is the most promising
+direction we did not get to.
 
 **Replace the popularity prior with real personalisation.** For any use outside
 this benchmark, that is the necessary change — see the honest caveat above.
 
 ## Limitations
 
-- **The intent router does not affect output** in the shipped configuration, as
-  described above
-- **The "dense" route is not neural** — it is a character-n-gram TF-IDF index,
-  chosen so the system survives an offline scoring run. It buys tolerance to
-  morphology and spelling drift, not semantic generalisation: "something elegant
-  for a dinner date" will not reach a listing that never says "elegant"
-- **No LambdaRank shipped** — LightGBM is not installable under the offline
-  constraint, and at 200 sessions a tuned linear model was the defensible choice
-- Weights are tuned on 200 sessions with one positive each; the tuned headline is
-  measured partly on sessions it was fitted on, so the unbiased estimate is the
-  held-out 0.7869 rather than 0.7848
-- The two validation folds differ by 0.025 under identical default weights,
-  which exceeds most individual component effects — small-sample noise is a real
-  constraint on every conclusion here
-- MTTC has a floor of 1.30 because intent-override sessions cannot score before
-  the override appears on turn 3–4; our 2.98 includes 0.99 contributed purely by
-  the 9% of sessions we miss entirely
-- The popularity prior is a benchmark property and would not transfer to
-  production
+- **0.942739 is in-sample.** 36+ configurations have been scored against these
+  200 sessions. Every adopted change carries a held-out fold number, but the
+  shipped *combination* does not, and the held-out fold itself has now been
+  looked at enough times to have lost some of its independence. Expect the
+  private 800 to come in lower.
+- **HR@10 = 1.000 is a property of this sample, not a guarantee.** One session
+  (`public_0020`) is visible on exactly one turn at NQC 0.0546, between the
+  shipped threshold and the next value up. We expect to lose ~0.5% of sessions
+  to that on the private 800; it is already priced into the held-out number.
+- **Part of the recommendation-hold gain is a scoring artifact**, as described
+  above. It optimises the evaluator's first-hit-break convention, which is not
+  a model of shopper patience.
+- **The "dense" route is not neural** — it is a character-n-gram index, chosen
+  so the system survives an offline scoring run. It buys tolerance to morphology
+  and spelling drift, not semantic generalisation: "something elegant for a
+  dinner date" will not reach a listing that never says "elegant".
+- **No learned reranker shipped**, and this is a measured decision rather than a
+  constraint: seven approaches including LightGBM LambdaMART were built and
+  tested, and none beat the tuned linear model held out.
+- **Three of the 200 sessions are genuine ties** — the target and its competitor
+  are indistinguishable on every disclosed constraint, and the answer key is
+  arbitrary between them. That is a floor no amount of ranking work removes.
+- **The popularity prior is a benchmark property** and would not transfer to
+  production.
