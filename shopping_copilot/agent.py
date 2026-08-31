@@ -21,7 +21,8 @@ on first hit, so a weak early list does not miss a better rank later, it
 forecloses it. Two gates below hold the list back while a turn is
 uninformative -- `recommend_min_spans` (has the customer said anything
 concrete?) and `min_recommend_confidence` (has the ranker committed?). They
-read different signals, compound, and are both inert at their defaults.
+read different signals, compound, and are both inert at their defaults. There
+is exactly one NQC threshold on that decision; see `config.py`.
 
 No LLM call anywhere on the turn path. The system is fully offline and
 deterministic; `usage` is reported as zero because no model is invoked.
@@ -248,11 +249,17 @@ class Agent:
         if self._trace is not None:
             self._log(state, ctx, candidates, turn)
 
-        # Withholding a list the ranker is not committed to. The first turn the
-        # target appears in the top ten ends the session, so a weak early list
-        # locks in its rank permanently; staying silent keeps the better rank a
-        # later turn would have produced reachable. Defaults make both gates
-        # inert, so this is a no-op until someone sets them.
+        # Withholding a list the ranker is not committed to. The evaluator
+        # breaks on first hit, so a weak early list does not merely miss a
+        # better rank later -- it forecloses it; staying silent keeps the
+        # better rank a later turn would have produced reachable.
+        #
+        # Two gates ask two different questions about whether this turn is
+        # worth answering, and are applied as an OR because a turn can fail
+        # either test independently. Both are inert at their defaults, and both
+        # carry their own turn cap -- an uncapped hold turns a hit into a miss,
+        # which costs the 0.5-weighted term to save the 0.2-weighted one.
+        # `recommend_on_ask_turns` (D2 above) is the third, oldest suppressor.
         dialogue = self.config.dialogue
         # `spans` is the disclosure count already computed for the injection
         # above -- the same evidence, read twice for two different decisions.
@@ -260,32 +267,25 @@ class Agent:
             len(spans) < dialogue.recommend_min_spans
             and turn < dialogue.recommend_max_wait
         )
-        withhold = turn < dialogue.recommend_min_turn or starved or (
-            dialogue.recommend_min_confidence > 0.0
-            and self.clarifier.confidence([s for _, s in ranked])
-            < dialogue.recommend_min_confidence
+        # Cheap tests first: `nqc` is only called once both cheap ones pass.
+        unconvinced = (
+            dialogue.min_recommend_confidence > 0.0
+            and turn < dialogue.recommend_turn_fallback
+            and nqc([s for _, s in ranked]) < dialogue.min_recommend_confidence
+        )
+        asked_instead = (
+            clarification.attribute is not None
+            and not dialogue.recommend_on_ask_turns
+        )
+        withhold = (
+            turn < dialogue.recommend_min_turn
+            or starved
+            or unconvinced
+            or asked_instead
         )
         recommendations = (
-            []
-            if withhold
-            else [{"parent_asin": asin} for asin in ordered]
-            if (clarification.attribute is None or dialogue.recommend_on_ask_turns)
-            else []
+            [] if withhold else [{"parent_asin": asin} for asin in ordered]
         )
-
-        # Recommendation gate. The evaluator breaks on first hit, so the rank
-        # we are scored on is fixed at the moment we know least: turn 1 is
-        # close to information-free by construction (a browsing opener
-        # discloses zero spans, and the category names hundreds of
-        # near-identical listings). Hold until the ranker has actually
-        # committed -- NQC over the ordered pool -- or until the fallback
-        # turn, whichever comes first. Composes with `recommend_on_ask_turns`
-        # as an AND: either may suppress.
-        dialogue = self.config.dialogue
-        if recommendations and dialogue.min_recommend_confidence > 0.0:
-            if (turn < dialogue.recommend_turn_fallback
-                    and nqc([s for _, s in ranked]) < dialogue.min_recommend_confidence):
-                recommendations = []
 
         return {
             "message": clarification.message,
@@ -319,6 +319,11 @@ class Agent:
                 "turn": turn,
                 "intent": ctx.intent,
                 "candidate_asin": product.parent_asin,
+                # Per-turn, repeated per row like `intent`. The replay in
+                # `tools/offline_eval.py` cannot reconstruct the disclosure
+                # gate without it, and a replay that cannot see a withheld
+                # turn records hits the live agent never emitted.
+                "spans": len(ctx.constraint_spans),
                 "features": extract(product, ctx),
             }) + "\n")
 

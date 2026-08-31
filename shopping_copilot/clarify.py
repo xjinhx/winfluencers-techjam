@@ -159,14 +159,6 @@ class ClarificationPolicy:
             reason="ear_gate",
         )
 
-    def confidence(self, scores: list[float]) -> float:
-        """Public accessor for the NQC signal.
-
-        The agent gates recommendation-withholding on the same number the EAR
-        gate uses to decide whether to ask, so the two decisions cannot
-        disagree about whether the ranker has committed."""
-        return self._confidence(scores)
-
     def _confidence(self, scores: list[float]) -> float:
         """Delegates to the module-level `nqc` -- see its docstring for why
         there is exactly one definition."""

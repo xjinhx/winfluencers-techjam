@@ -242,17 +242,23 @@ class DialogueConfig:
     # gains 0.3*0.5/200 = 0.00075. A turn is worth spending whenever it buys
     # more than 0.067 of reciprocal rank.
     #
-    # Both default to exact no-ops; they are levers for an experiment, not a
-    # behaviour change. `recommend_min_confidence` gates on the same NQC signal
-    # the clarifier already uses to decide whether to ask.
-    recommend_min_turn: int = 1
-    recommend_min_confidence: float = 0.0
+    # Three levers below hold the list back, applied as an OR in `agent.py`.
+    # All are inert at their defaults, and each of the two real gates carries
+    # its own turn cap: no configuration of them can withhold a session
+    # forever, because an uncapped hold turns a hit into a miss and spends the
+    # 0.5-weighted term to save the 0.2-weighted one.
 
-    # The selective form of the same idea, and the one worth preferring: wait
-    # for *evidence*, not for a turn number. `recommend_min_turn` silences every
-    # session equally, including the 70 of 200 whose top-1 is already the target
-    # on turn 1 -- pure MTTC cost for no rank gain, and the sessions where the
-    # agent looks worst for refusing to answer.
+    # The blunt lever, kept as a tuner handle and as the baseline the two gates
+    # below are measured against: silence every session until this turn. It
+    # silences the 70 of 200 whose top-1 is already the target on turn 1 too --
+    # pure MTTC cost for no rank gain, and the sessions where the agent looks
+    # worst for refusing to answer -- which is why it is not the adopted form.
+    # Inert at 1, since turns are 1-based.
+    recommend_min_turn: int = 1
+
+    # GATE 1 -- has the *customer* said anything concrete yet? The selective
+    # form of the same idea, and the one worth preferring: wait for *evidence*,
+    # not for a turn number.
     #
     # Measured on the public set, split by what the shopper has disclosed at
     # turn 1: with one constraint span the target is already at rank 1 in 57 of
@@ -261,22 +267,26 @@ class DialogueConfig:
     # "the shopper has said something concrete", which is why it is set on
     # principle rather than swept.
     #
-    # `recommend_max_wait` is the safety cap: past it, answer regardless, so a
-    # customer who never discloses anything is not met with silence forever.
-    # Defaults are inert (min_spans 0 can never exceed a span count).
+    # `recommend_max_wait` is this gate's turn cap: past it, answer regardless,
+    # so a customer who never discloses anything is not met with silence
+    # forever. Inert at min_spans 0, which can never exceed a span count.
     recommend_min_spans: int = 0
     recommend_max_wait: int = 3
 
-    # Two independent gates on the same decision, developed in parallel and
-    # kept together deliberately: this one asks "has the customer said anything
-    # concrete yet?", the one below asks "has the ranker committed?". They read
-    # different signals and `agent.py` applies both, so neither supersedes the
-    # other. Both are inert at their defaults.
-
-    # Recommendation gate -- SEPARATE from the EAR ask gate above, and on a
-    # DIFFERENT SCALE. `ask_max_confidence` (0.82) sits above the entire
-    # observed NQC range [0.011, 0.194], which is why CLAUDE.md records that
-    # gate as never once flipping a decision on the public 200: it is not
+    # GATE 2 -- has the *ranker* committed? Reads NQC over the ordered pool.
+    #
+    # Gate 1 and gate 2 were developed in parallel and are kept together
+    # deliberately: they read different signals, neither supersedes the other,
+    # and a turn can fail either test independently. There is deliberately only
+    # ONE NQC threshold on this decision -- the parallel branch carried a
+    # second, uncapped, near-identically named `recommend_min_confidence`,
+    # removed 2026-08-31 (it was never set anywhere, so removing it is
+    # behaviour-preserving). Two dials on one statistic is a trap, not a lever.
+    #
+    # SEPARATE from the EAR ask gate above, and on a DIFFERENT SCALE.
+    # `ask_max_confidence` (0.82) sits above the entire observed NQC range
+    # [0.011, 0.194], which is why CLAUDE.md records that gate as never once
+    # flipping a decision on the public 200: it is not
     # broken, it is unreachable. This threshold is the same statistic
     # calibrated to the range the system actually produces -- do not tune the
     # two together or reason from one to the other.
@@ -288,9 +298,10 @@ class DialogueConfig:
     # target from its imposter. One more turn improves 68% of the sessions
     # that are losing and changes 98% of the ones already won.
     #
-    # 0.0 disables the gate entirely (byte-identical to prior behaviour),
-    # which is why this is a threshold rather than a boolean -- rollback is
-    # one config value, not a code-path removal.
+    # `recommend_turn_fallback` is this gate's turn cap. 0.0 disables the gate
+    # entirely (byte-identical to prior behaviour), which is why this is a
+    # threshold rather than a boolean -- rollback is one config value, not a
+    # code-path removal.
     min_recommend_confidence: float = 0.0
     recommend_turn_fallback: int = 3
 
