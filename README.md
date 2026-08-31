@@ -251,7 +251,8 @@ all 200 sessions against the *shipped* configuration. `delta` is what that
 component is worth: a large negative number means removing it hurts, so it is
 carrying real load; a positive number means the system scored slightly *better*
 without it. Regenerate with
-`python -m tools.ablate --config config/tuned.json`.
+`python -m tools.ablate --config config/tuned.json`; machine-readable output
+in `docs/ablations_tuned.json` / `docs/ablations_tuned.md`.
 
 **Read the magnitudes with the noise floor in mind.** A single run on 200
 sessions cannot resolve small differences — one session is 0.5 points of HR@10.
@@ -443,7 +444,8 @@ Other entry points:
 ```bash
 python -m unittest discover -s tests          # 60 unit tests
 python -m tools.demo --sample public_0002      # one full multi-turn transcript
-python -m tools.ablate                         # regenerate the ablation table
+python -m tools.ablate --config config/tuned.json --output docs/ablations_tuned.json --markdown docs/ablations_tuned.md   # ablate the SHIPPED build
+python -m tools.ablate                         # ablate the untuned defaults (the historic 0.7641 table)
 python -m tools.measure_attribute_yield        # regenerate the disclosure table
 python -m tools.tune --output <scratch>.json --report <scratch>.json  # coordinate ascent, split-half CV
 python -m tools.offline_eval --trace <trace>.jsonl --against <results>.json  # replay/validate a trace session-by-session
@@ -576,8 +578,8 @@ promising unexplored direction that has not yet been tried.
 ## Team contributions
 
 - **He Jinhong** — conjunctive candidate injection, gender-hierarchy and
-  brand-false-positive structural fixes, rank-2 text-read and ceiling analysis,
-  learned-reranker sweep (sklearn + LightGBM), project direction and PRD review
+  brand-false-positive structural fixes
+- **Ng Yee Teng** —rank-2 text-read and ceiling   analysis, learned-reranker sweep (sklearn + LightGBM), project direction and PRD review
 - **Arwen Tan** — evidence-gated recommendation withholding
   (`recommend_min_spans`), span-selectivity and injection-gate sweeps
 - **Dylan Huang** — `per_field_depth` recall fix, `constraint_commonness_penalty`,
