@@ -30,9 +30,51 @@ from pydantic import BaseModel  # noqa: E402
 
 from starter.agent import Agent  # noqa: E402
 
-CATALOG_PATH = REPO_ROOT / "data" / "catalog.jsonl"
+CATALOG_PATH = Path(os.environ.get("CATALOG_PATH", str(REPO_ROOT / "data" / "catalog.jsonl")))
 PUBLIC_SET_PATH = REPO_ROOT / "data" / "public_set.jsonl"
 TURN_LIMIT = 10
+
+
+def _ensure_catalog() -> None:
+    """Download the catalog from bucket storage if it isn't on disk.
+
+    The catalog is frozen/gitignored per submission rules (see root
+    CLAUDE.md), so it never ships in the repo -- it has to reach the
+    deployed container some other way. This pulls it from an S3-compatible
+    bucket (Railway Bucket, or anything else that speaks the same API) on
+    first boot, then leaves it in place for subsequent restarts.
+    """
+    if CATALOG_PATH.is_file():
+        return
+
+    bucket = os.environ.get("CATALOG_BUCKET_NAME")
+    endpoint = os.environ.get("CATALOG_BUCKET_ENDPOINT")
+    access_key = os.environ.get("CATALOG_BUCKET_ACCESS_KEY_ID")
+    secret_key = os.environ.get("CATALOG_BUCKET_SECRET_ACCESS_KEY")
+    if not all([bucket, endpoint, access_key, secret_key]):
+        raise RuntimeError(
+            f"{CATALOG_PATH} is missing and CATALOG_BUCKET_* env vars are not "
+            "fully set -- cannot fetch the catalog."
+        )
+    object_key = os.environ.get("CATALOG_BUCKET_KEY", "catalog.jsonl")
+    region = os.environ.get("CATALOG_BUCKET_REGION", "auto")
+
+    import boto3  # noqa: PLC0415 -- only needed on the cold-start download path
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region,
+    )
+    CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = CATALOG_PATH.with_suffix(".jsonl.partial")
+    client.download_file(bucket, object_key, str(tmp_path))
+    tmp_path.rename(CATALOG_PATH)
+
+
+_ensure_catalog()
 
 app = FastAPI(title="Shopping Copilot Demo API")
 
