@@ -195,10 +195,46 @@ class BrandVocabulary:
     Built from `store`, which is populated on 99.4% of rows. Single-token brands
     must be at least four characters and outside the blocklist, because a false
     brand match is a large, confident, wrong constraint.
+
+    BRAND_BLOCKLIST is hand-written, and hand-written lists only cover the cases
+    someone thought of. In a catalog with 19,855 distinct stores, a great many
+    ordinary English words are *also* somebody's brand -- and the customer
+    quotes listing boilerplate verbatim, so those words arrive constantly.
+    Measured at the lock-in turn over the 200 public sessions: a brand was
+    extracted in 66 sessions and **62 of them were wrong** (a 94% false-positive
+    rate), driven by `wash` (20), `sole` (15), `hand` (15) and `machine` (11)
+    out of "Machine Wash" and "Rubber sole".
+
+    That rate is real; its scoring cost is NOT, and the gate below is off by
+    default for exactly that reason. `check_brand` returns VIOLATED for every
+    product whose brand_key is not the extracted one, so a spurious brand
+    applies -0.06 to 99.4% of the pool *uniformly* -- and a uniform offset
+    cannot reorder anything. Measured: identical TechnicalScore (0.909328) at
+    every threshold from 0.005 to 0.20. Only two classes of candidate differ,
+    and both are negligible: the 8 products in 50,000 literally stored as
+    "Sole"/"Wash"/"Machine" etc., which would wrongly take brand_satisfied
+    +0.18 if one were ever drawn into a 200-candidate pool, and the 314 rows
+    (0.63%) with no store, which score UNKNOWN (0.0) rather than -0.06.
+
+    So the blocklist is backed by a *measured* test, the same move
+    `constraint_commonness_penalty` made when a hardcoded phrase list was
+    rejected for the same reason: compare how often a word appears as ordinary
+    listing text against the fact that it names a store. Real single-word brands
+    and ordinary words separate by two orders of magnitude --
+
+        sole 0.206   wash 0.317   hand 0.168   machine 0.214
+        hanes 0.0021  crocs 0.0030  carhartt 0.0014  skechers 0.0077
+
+    -- so this needs no per-word curation and no list to maintain.
     """
 
-    def __init__(self, catalog: Catalog) -> None:
+    def __init__(self, catalog: Catalog, commonness=None) -> None:
         self.by_surface: dict[str, str] = {}
+        # Text commonness per single-word surface, recorded at build time but
+        # applied at *match* time: `Agent.apply_config` deliberately does not
+        # rebuild the extractor, so a build-time gate would make the threshold
+        # a silent no-op under tuning -- the same trap `rerank_depth` set.
+        self.text_commonness: dict[str, float] = {}
         self.max_words = 1
         for product in catalog.products:
             store = product.store.strip().lower()
@@ -210,27 +246,51 @@ class BrandVocabulary:
             surface = " ".join(words)
             if len(words) == 1 and (len(words[0]) < 4 or words[0] in BRAND_BLOCKLIST):
                 continue
+            if len(words) == 1 and commonness is not None and surface not in self.text_commonness:
+                # The index is keyed by stemmed terms; a surface that survives
+                # tokenisation as nothing (pure digits, say) scores 0.0 and is
+                # left to the length/blocklist guards above.
+                terms = tokenize(surface)
+                self.text_commonness[surface] = max(
+                    (commonness(term) for term in terms), default=0.0
+                )
             self.by_surface.setdefault(surface, product.brand_key)
             self.max_words = max(self.max_words, min(len(words), 4))
 
-    def find(self, text: str) -> set[str]:
+    def find(self, text: str, max_text_commonness: float = 0.0) -> set[str]:
+        """Brand keys named in `text`.
+
+        `max_text_commonness` > 0 drops single-word matches whose word is that
+        common as ordinary listing text. 0.0 disables the gate entirely, which
+        reproduces the pre-measurement behaviour byte-for-byte.
+        """
         words = re.findall(r"[a-z0-9]+", text.lower())
         found: set[str] = set()
         for size in range(min(self.max_words, len(words)), 0, -1):
             for i in range(len(words) - size + 1):
                 surface = " ".join(words[i:i + size])
                 key = self.by_surface.get(surface)
-                if key:
-                    found.add(key)
+                if not key:
+                    continue
+                if (
+                    max_text_commonness > 0.0
+                    and size == 1
+                    and self.text_commonness.get(surface, 0.0) > max_text_commonness
+                ):
+                    continue
+                found.add(key)
         return found
 
 
 class ConstraintExtractor:
     """Pulls structured slots out of customer text."""
 
-    def __init__(self, catalog: Catalog) -> None:
+    def __init__(self, catalog: Catalog, commonness=None) -> None:
         self.catalog = catalog
-        self.brands = BrandVocabulary(catalog)
+        self.brands = BrandVocabulary(catalog, commonness)
+        # Set by Agent from RetrievalConfig, and re-set by apply_config, so a
+        # tuning sweep over the threshold takes effect without an index rebuild.
+        self.brand_max_text_commonness: float = 0.0
         self.category_vocab: dict[str, str] = {}
         # Stemmed tokens per vocab level, so "shirt" (customer, singular)
         # still matches a catalog level stored as "Shirts" (plural) -- a
@@ -247,13 +307,30 @@ class ConstraintExtractor:
         lowered = text.lower()
 
         if constraints.gender is None:
+            # First match wins, EXCEPT that a specific child audience beats the
+            # generic one. "baby girls bodysuits" hit "baby" first and resolved
+            # to `kids`, discarding the "girls" standing right next to it --
+            # and the customer's opening line is built from the target's own
+            # category path, so this pattern is common (224 catalog rows read
+            # exactly this way). Only the parent/child pair is reordered;
+            # nothing else about the scan changes.
+            found: list[str] = []
             for raw in re.findall(r"[a-z]+", lowered):
                 mapped = GENDER_WORDS.get(raw)
                 if mapped:
-                    constraints.gender = GENDER_CANON.get(mapped, mapped)
+                    mapped = GENDER_CANON.get(mapped, mapped)
+                    if mapped not in found:
+                        found.append(mapped)
+                    if mapped not in {"kids", "boys", "girls"}:
+                        break
+            for candidate in found:
+                if candidate in {"boys", "girls"}:
+                    constraints.gender = candidate
                     break
+            else:
+                constraints.gender = found[0] if found else None
 
-        constraints.brands |= self.brands.find(text)
+        constraints.brands |= self.brands.find(text, self.brand_max_text_commonness)
         constraints.materials |= {m.lower() for m in MATERIAL_RE.findall(text)}
         constraints.colors |= {c.lower() for c in COLOR_RE.findall(text)}
         constraints.sizes |= {s.lower() for s in SIZE_RE.findall(text)}
@@ -290,6 +367,27 @@ def check_gender(product: Product, constraints: Constraints) -> str:
     if actual == "unisex" and constraints.gender in {"women", "men"}:
         return SATISFIED
     if constraints.gender == "unisex" and actual in {"women", "men"}:
+        return UNKNOWN
+    # "kids" is the PARENT of boys/girls, not a sibling. Treating the audience
+    # relation as equality made a listing punish itself: the customer's opening
+    # line is built from the target's own category path, so "Baby Girls
+    # Bodysuits" extracts `kids` and then scored every actual baby-girls
+    # listing VIOLATED at -0.23. Measured over all 50k rows against the opening
+    # line each one would generate, 506 (1.01%) took that own goal -- 313 of
+    # them this parent/child case. Public-set exposure was 0/200, which is why
+    # it survived: ~0.6% of rows is ~1 session in 200 and ~5 in 800.
+    if constraints.gender == "kids" and actual in {"boys", "girls"}:
+        return SATISFIED
+    # The reverse is weaker evidence, not contrary evidence: a listing filed
+    # only "kids" against a customer who said "boys" is less specific, not
+    # conflicting. Same asymmetry the unisex/adult pair above already uses,
+    # and the module's rule that silence never reads as VIOLATED.
+    if actual == "kids" and constraints.gender in {"boys", "girls"}:
+        return UNKNOWN
+    # `unisex` here is unisex-*adult* (GENDER_CANON sends "unisex child" to
+    # "kids"), but a bare "unisex" listing can be either, so it is ambiguous
+    # against a kids request rather than contrary.
+    if constraints.gender == "kids" and actual == "unisex":
         return UNKNOWN
     return VIOLATED
 

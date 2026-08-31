@@ -84,17 +84,23 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.908578`, HR@10 = 1.000 — every public
-session hits.** Measured 2026-08-31 on the `mega-fix` working tree (`46a6294`
-plus the conjunctive-injection change, uncommitted at time of writing) by
-running the committed `config/tuned.json` through the unmodified CLI
-evaluator on all 200 public sessions. The injection is **always-on in code**
-(no config flag — see the top "What was found" entry), so the committed
-config produces this number as-is. Up from **0.903753** (this tree with the
-old code) / **0.903604** (`d2f12ac`, the last committed-trunk measurement).
-Gates: `tools.evalkit.Bench` reproduces it exactly; `tools.offline_eval`
-against a fresh trace agrees on **200/200** session `best_rank`s;
-`target_never_in_pool` **1 → 0**; 49/49 tests pass.
+**Live score: `TechnicalScore = 0.909328`, HR@10 = 1.000 — every public
+session hits.** This is `0.908578` (below) plus the synthetic span
+normalisation fix (+0.00075, see "What was found"); this line was not
+updated when that entry landed and is corrected here rather than left
+contradicting it. Reconfirmed 2026-08-31 on `eba9e70` after the gender
+hierarchy fix and the (disabled-by-default) brand false-positive gate,
+both byte-identical on the public set by design — see the top "What was
+found" entry. `config/tuned.json` now carries `brand_max_text_commonness:
+0.01`; every other value unchanged. Gates: `tools.evalkit.Bench` reproduces
+it exactly; `tools.offline_eval` against a fresh trace agrees on **200/200**
+session `best_rank`s; `target_never_in_pool` **1 → 0**; 51/51 tests pass
+(49 + 2 added for the gender fix).
+
+Prior figures, kept for the chain: up from **0.908578** (the conjunctive
+injection, `46a6294` plus the injection change) from **0.903753** (this
+tree with the old code) / **0.903604** (`d2f12ac`, the last
+committed-trunk measurement).
 
 **Tree note (2026-08-31):** `mega-fix` at `46a6294` (the arwen and
 maximising-101 merges) re-measured the committed config at **0.903753**
@@ -313,6 +319,178 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**Gender hierarchy fix (live) + brand false-positive gate (adopted, config
+now on) -- both correctness fixes with zero measured public-set effect,
+adopted for the private 800 (2026-08-31, He Jinhong: "what are some
+marketing persuasion tactics... i want to implement that in the agent",
+then "it needs to be a generalised solution", then "brand_max_text_commonness:
+0.01 in tuned.json").** Full writeup: `docs/PRD_merchandising_facets.md`.
+
+**Origin.** Three merchandising tactics were proposed from `public_0199`
+(a boys' briefs target losing rank 2 to a men's competitor): audience
+gating, facet-first ordering, within-cell popularity. A 74-pair
+instrumented capture (all sub-rank-1 sessions, reproduces 0.909328 exactly)
+showed all three lack a precondition -- target and winner tie on every
+live constraint span in 74/74 pairs, and on `evaluate_all` in 73/74. There
+is no facet to partition on at the turn the score locks in. **All three
+original tactics were killed on evidence, including a catalog-derived
+audience-inference design that inverted on the originating session itself**
+(confidently inferred `men` for `public_0199` at 0.73, because "Underwear
+Briefs" is 73% men's catalog-wide). None of this is in code; the PRD is
+the record.
+
+**What survived: two structural bugs found by generalising the same
+own-goal test** (evaluate a target against constraints drawn from its own
+listing, catalog-wide -- not from the 200 public sessions, per He
+Jinhong's explicit generalisation requirement) **across all six
+constraint dimensions:**
+
+| dimension | own-goal rate before fix |
+|---|---|
+| gender | 506/50,000 rows (1.01%) |
+| brand | 114/200 public targets VIOLATED by their own listing |
+
+**1) Gender hierarchy -- `structured.py`, no config flag, live now.**
+`check_gender` treated `kids` as a sibling of `boys`/`girls` rather than
+their parent, so a customer saying "toddler"/"baby" (-> `constraints.gender
+= "kids"`) scored every boys'/girls' listing VIOLATED at -0.23 -- including
+the listing whose own category path produced the word "kids" in the first
+place. Compounded by `ConstraintExtractor.update`'s first-match gender
+scan: "Baby Girls Bodysuits" hit "baby" before "girls" and discarded the
+more specific word. Fixed both: `kids` is now a supertype (SATISFIED
+against boys/girls, not VIOLATED; the reverse is UNKNOWN, not VIOLATED --
+same asymmetry the existing unisex/adult pair already uses), and a
+specific child audience now outranks the generic one during extraction.
+Siblings (`boys` vs `girls`) still VIOLATED; every adult rule untouched.
+**Measured catalog-wide (all 50k rows, not the 200-session sample) against
+the exact opening line each row would generate: own-goal rate 506 -> 180
+rows (1.01% -> 0.36%)**, all 313 hierarchy cases cured, the 180 remaining
+are genuine catalog mislabels (e.g. a men's item filed under a women's
+listing) this fix correctly leaves alone. Public-set exposure was 0/200 --
+observing zero is consistent with a ~0.6%-of-rows defect by chance, not
+with it being unreachable, which is exactly what a public-200-only view
+cannot distinguish. Full evaluator: **0.909328, byte-identical** (this is
+the intended, pre-registered result -- the fix's value is entirely on the
+private 800 and is unverifiable from this set by construction). 51/51
+tests (49 + 2 new).
+
+**2) Brand false positives -- `RetrievalConfig.brand_max_text_commonness`,
+now 0.01 in `config/tuned.json` (was 0.0/disabled).** `BrandVocabulary`
+matches single ordinary words that happen to be store names somewhere in
+a 19,855-brand catalog; `BRAND_BLOCKLIST` is hand-written and missed the
+words the simulator actually quotes. **Measured live at the lock-in turn,
+all 200 sessions: a brand was extracted in 66 sessions and 62 were wrong
+(94% false-positive rate)**, dominated by `wash` (20), `sole` (15),
+`hand` (15), `machine` (11) out of "Machine Wash" / "Rubber sole" listing
+boilerplate. Fix, in the same spirit as `constraint_commonness_penalty`
+(a hardcoded phrase list was explicitly rejected there too): gate
+single-word brand matches by measured catalog text-commonness rather than
+a curated list. Real brands and boilerplate separate two orders of
+magnitude (`sole` 0.206, `wash` 0.317 vs `hanes` 0.0021, `skechers`
+0.0077), so 0.01 is not a delicate cut -- it catches 14/15 observed
+offenders and keeps all 13 real single-word brands tested. Applied at
+*match* time, not build time: `Agent.apply_config` deliberately does not
+rebuild the extractor, so a build-time gate would have been a silent
+no-op under any future tuning sweep -- the same trap `rerank_depth`
+already set once.
+
+**Measured score effect: exactly zero, at every threshold tested
+(0.005-0.20 on fold A; 0.01 on the full 200) -- and the reason is
+mechanical, not a fitting failure.** `check_brand` returns VIOLATED for
+every candidate whose store isn't the extracted brand, so a spurious
+brand applies -0.06 **uniformly** across ~99.4% of any pool, and a
+uniform offset cannot reorder anything. Only two classes of candidate
+differ, both negligible: 8 products in 50,000 (0.016%) are literally
+stored as `Sole`/`Wash`/`Hand`/`Machine`/etc. and would wrongly earn
+`brand_satisfied` +0.18 if one were ever drawn into a 200-candidate pool
+(essentially never); 314 rows (0.63%) have no store and score UNKNOWN
+(0.0) rather than -0.06. **An earlier verbal estimate this session of "a
+0.24-point swing" was corrected before being written into code or this
+file** -- arithmetically right in isolation, practically wrong because it
+assumed the literally-named product reaches the pool, which the 0.016%
+figure rules out. Full evaluator with the flag on: **0.909328, byte-for-
+byte identical to off.** `results.json` untouched; every run scratch-
+pathed per Critical rule 1.
+
+**Adopted anyway, on the same basis as the gender fix.** Both changes are
+justified by catalog-wide measurement (50k rows), not by any public-set
+score movement, which is deliberate: he Jinhong flagged mid-session that
+the private 800 is the real target and a fix tailored to the 200 public
+sessions is worth negative value. The public set proving 0.000000 is the
+pre-registered pass condition for that kind of change, not a null result
+to be disappointed by. Reverting the brand gate instead of shipping it
+disabled-by-default would have been equally defensible (it is ~40 lines
+buying no *measured* score) -- adopted at 0.01 because the false-positive
+rate it removes is real, the fix is cheap, and the failure mode it
+guards against (a spurious brand constraint from ordinary boilerplate) is
+structural to any catalog this large, not specific to these 200 rows.
+
+**Two other tactics from the same session, DO NOT BUILD, evidence in the
+PRD:** catalog-derived audience inference (T1b) fires 43/74 times with 2
+correct-and-decisive against 3 wrong; facet-first sort ordering (T2) has
+a non-constant sort key in only 1/74 pairs. Within-cell popularity (T3)
+is not ruled out structurally but the cross-cell comparison it would
+correct occurs 1/74 times -- optional, not pursued further.
+
+**THE RANK-2 TEXT READ IS DONE, and it closes the question the roadmap has
+carried since 2026-08-30: 0.97 is NOT reachable. The measured hard ceiling is
+~0.95 (2026-08-31, He Jinhong: "can help me run this").** All 30 rank-2 pairs
+read by hand against what the customer had *actually said at the lock-in
+turn* — captured from an instrumented live run (reproduces 0.909328 exactly),
+not reconstructed.
+
+**Verdicts, 30 pairs, three buckets:**
+
+| verdict | meaning | n |
+|---|---|---|
+| **A** | disclosed info already separated them -> ranker got it wrong | **0** |
+| **B** | separable only after more disclosure -> timing | **27** |
+| **C** | not separable even with the full card -> structural tie | **3** |
+
+**Zero A cases is the headline.** There is not one rank-2 session where the
+agent held enough information and still mis-ordered. **The ranker is not
+making avoidable mistakes at rank 2** — which retires, on evidence, the
+theory floated earlier the same day that popularity was drowning constraint
+evidence. Winner-is-more-popular is **15/30**, a coin flip, and in several
+pairs the target is far more popular and loses anyway (`public_0006`: 3042
+ratings vs 41; `public_0058`: 1032 vs 231). Popularity is not the villain.
+
+**The actual state of the world at lock-in: median 1 span live out of a
+median 4-span card. 8 of 30 had ZERO spans — the customer had said nothing
+but a category label. In 0 of 30 was the full card disclosed.** Asking the
+ranker to pick one product out of a category from a bare category name is a
+lottery; rank 2 there is already a good outcome, not a defect.
+
+**The 3 structural ties are real and worth knowing by name.** `public_0058`
+is the cleanest: target JTANIB vs winner Rokka&Rolla, both *"100% Polyester
+Imported Zipper closure"* women's lightweight hooded packable rain jackets,
+both matching 4/4 of the card. No feature, no weighting and no human can
+separate them from the listing text — the evaluator's answer key is arbitrary
+between them. Also `public_0120` and `public_0175`.
+
+**The ceiling, with MTTC priced in — this is the number that kills 0.97.**
+MRR wants more disclosure; MTTC wants fewer turns; the evaluator breaks on
+first hit, so they are in *direct* opposition and you cannot have both:
+
+| disclosure reached by | MTTC | ceiling |
+|---|---|---|
+| turn 1 (free, impossible) | 1.875 | 0.9585 |
+| turn 2 | 2.100 | 0.9540 |
+| **turn 3 (realistic: 4-span card at <=2 spans/ask)** | **2.410** | **0.9478** |
+| turn 4 | 2.760 | 0.9408 |
+
+Even the physically-impossible free-disclosure row is 0.9585. **Realistic
+perfect play on this lever is ~0.947-0.954.** 0.97 would need MRR ~0.97 *and*
+MTTC ~1.5 simultaneously, which the first-hit-break rule forbids.
+
+**What this means for planning.** The remaining work is worth roughly
+**+0.038 (0.9093 -> ~0.947)**, all of it in disclosure timing, and it is
+gated on a policy change (confidence-gated withholding / ask-before-recommend)
+rather than any new feature or learner. Set expectations at **~0.95, not
+0.97**, and treat 0.97 as out of reach on the public set. Artifacts:
+`READING_PACK.txt` (the 30 pairs with dialogue), `capture.py` (instrumented
+run), `reading_rows.json` (the classification) — all in scratch, regenerable.
 
 **Synthetic span normalisation: +0.00075 alone, +0.010 on the ceiling
 (2026-08-31).** Named for the cause, not the colour: `intent_card` does not

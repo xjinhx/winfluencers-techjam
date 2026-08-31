@@ -53,7 +53,10 @@ class Agent:
         self.catalog = Catalog(catalog_path)
         self.lexical = LexicalIndex(self.catalog, self.config.retrieval)
         self.dense = build_dense_route(self.catalog, self.config.retrieval)
-        self.extractor = ConstraintExtractor(self.catalog)
+        self.extractor = ConstraintExtractor(self.catalog, self.lexical.commonness)
+        self.extractor.brand_max_text_commonness = (
+            self.config.retrieval.brand_max_text_commonness
+        )
         self.ranker = Ranker(
             self.config.ranking, self.config.priors, self.config.constraints
         )
@@ -87,6 +90,9 @@ class Agent:
             field: getattr(config.retrieval, f"w_{field}")
             for field in self.lexical.fields
         }
+        self.extractor.brand_max_text_commonness = (
+            config.retrieval.brand_max_text_commonness
+        )
         self.ranker = Ranker(config.ranking, config.priors, config.constraints)
         self.clarifier = ClarificationPolicy(config.dialogue)
         self.sessions.clear()

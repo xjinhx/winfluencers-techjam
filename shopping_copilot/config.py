@@ -49,6 +49,18 @@ class RetrievalConfig:
     # preserves prior behaviour exactly).
     constraint_commonness_penalty: float = 0.0
 
+    # Drop a single-word brand match when that word is this common as ordinary
+    # listing text (max document-frequency ratio over title/features/
+    # categories, the same measure as `commonness` above). The hand-written
+    # BRAND_BLOCKLIST missed the words the simulator actually quotes: measured
+    # live at the lock-in turn, 62 of 66 brand extractions across the 200
+    # public sessions were wrong, from "Machine Wash" and "Rubber sole".
+    # Ordinary words and real single-word brands separate by two orders of
+    # magnitude (sole 0.206 / wash 0.317 vs hanes 0.0021 / skechers 0.0077),
+    # so the cut is not delicate. 0.0 = disabled (default, byte-identical to
+    # the pre-measurement behaviour).
+    brand_max_text_commonness: float = 0.0
+
     # Convex combination, not RRF (Bruch et al. 2210.11934). One parameter,
     # tunable on 200 sessions.
     fusion_alpha: float = 0.78  # weight on lexical; (1 - alpha) on dense

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -333,6 +334,42 @@ class ConstraintTests(unittest.TestCase):
         constraints = self.extractor.update(Constraints(), "womens 100% Leather belt")
         self.assertEqual(constraints.gender, "women")
         self.assertIn("leather", constraints.materials)
+
+    def test_kids_is_a_parent_of_boys_and_girls_not_a_sibling(self):
+        # A customer who says "toddler" sets gender="kids"; a listing filed
+        # `boys` satisfies that. Treating them as siblings made 313 catalog
+        # rows score VIOLATED (-0.23) against their own opening line.
+        boys = self.catalog.get("B000000003")
+        self.assertEqual(boys.effective_gender, "boys")
+        self.assertEqual(check_gender(boys, Constraints(gender="kids")), SATISFIED)
+        # The reverse is missing specificity, not contrary evidence.
+        as_kids = replace(boys, gender="kids", gender_fallback="kids")
+        self.assertEqual(check_gender(as_kids, Constraints(gender="boys")), UNKNOWN)
+        # ...but siblings genuinely conflict, and adult rules are untouched.
+        self.assertEqual(check_gender(boys, Constraints(gender="girls")), VIOLATED)
+        self.assertEqual(
+            check_gender(self.catalog.get("B000000002"), Constraints(gender="women")),
+            VIOLATED,
+        )
+
+    def test_specific_child_audience_beats_the_generic_one(self):
+        # "baby" hit first and resolved to `kids`, discarding the "girls"
+        # standing next to it -- and the opening line is built from the
+        # target's own category path, so this phrasing is common.
+        self.assertEqual(
+            self.extractor.update(Constraints(), "Baby Girls Bodysuits").gender, "girls"
+        )
+        self.assertEqual(
+            self.extractor.update(Constraints(), "Baby Boys Bodysuits").gender, "boys"
+        )
+        # A generic phrase still resolves generically, and first-match
+        # semantics are preserved everywhere else.
+        self.assertEqual(
+            self.extractor.update(Constraints(), "toddler pajamas").gender, "kids"
+        )
+        self.assertEqual(
+            self.extractor.update(Constraints(), "kids shoes for women").gender, "kids"
+        )
 
 
 class FeatureTests(unittest.TestCase):
