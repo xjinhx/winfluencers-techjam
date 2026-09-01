@@ -659,5 +659,65 @@ class RecommendationGateTests(unittest.TestCase):
         self.assertFalse(recommendations_withheld([1.0] + [0.999] * 9, 1, None))
 
 
+class DisclosedAskDecayTests(unittest.TestCase):
+    """`DialogueConfig.disclosed_ask_decay` -- damping an attribute the customer
+    already answered by disclosure rather than in reply to an ask.
+
+    Measured at -0.0002 on the public 200 and NOT adopted (see CLAUDE.md), so
+    what these pin is that the default is a true no-op and that the lever
+    still does what it says if anyone turns it on.
+    """
+
+    class _FakeConstraints:
+        def __init__(self, filled):
+            self._filled = filled
+
+        def filled_slots(self):
+            return list(self._filled)
+
+    class _FakeState:
+        def __init__(self, filled):
+            self.constraints = DisclosedAskDecayTests._FakeConstraints(filled)
+            self.exhausted_attributes = set()
+            self.asked_attributes = []
+
+    def _gain(self, attribute, filled, decay):
+        config = Config().dialogue
+        config.disclosed_ask_decay = decay
+        # Only this attribute is askable, so _best_attribute must return it.
+        # Every other prior is zeroed explicitly -- an absent key falls back to
+        # 0.2 inside _best_attribute, which would let a rival attribute win.
+        config.attribute_prior = {name: 0.0 for name in ALLOWED_ATTRIBUTES}
+        config.attribute_prior[attribute] = 1.0
+        config.attribute_prior_floor = 0.0
+        policy = ClarificationPolicy(config)
+        _, product = _tiny_catalog()
+        state = self._FakeState(filled)
+        return policy._best_attribute(state, [product])
+
+    def test_default_is_a_no_op(self):
+        filled = self._gain("material", {"materials"}, 1.0)
+        empty = self._gain("material", set(), 1.0)
+        self.assertEqual(filled, empty,
+                         "1.0 must leave an already-answered attribute untouched")
+
+    def test_decay_damps_an_already_answered_attribute(self):
+        attribute, full = self._gain("material", set(), 0.25)
+        _, damped = self._gain("material", {"materials"}, 0.25)
+        self.assertEqual(attribute, "material")
+        self.assertAlmostEqual(damped, full * 0.25)
+
+    def test_zero_is_a_hard_skip(self):
+        self.assertEqual(self._gain("material", {"materials"}, 0.0), (None, 0.0))
+
+    def test_slotless_attributes_are_never_considered_answered(self):
+        # `feature`/`style`/`other` are the evaluator's catch-alls for spans
+        # this system never parses into a structured slot, so "already
+        # answered" is unobservable for them -- they must stay askable.
+        _, full = self._gain("feature", set(), 0.0)
+        _, still = self._gain("feature", {"materials", "colors", "categories"}, 0.0)
+        self.assertEqual(full, still)
+
+
 if __name__ == "__main__":
     unittest.main()

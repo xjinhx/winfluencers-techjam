@@ -1,0 +1,17 @@
+# Overrides .gitignore for `railway up` uploads only -- does not affect git.
+#
+# data/catalog.jsonl and data/public_set.jsonl are gitignored (frozen per the
+# submission rules, never committed) but the demo API service needs them at
+# runtime, and `railway up` uploads the local working directory rather than
+# pulling from git. Everything else stays excluded to keep the upload small.
+
+.venv/
+frontend/api/.venv/
+frontend/web/node_modules/
+frontend/web/dist/
+__pycache__/
+*.pyc
+.git/
+data/releases/
+organizer/
+secure/

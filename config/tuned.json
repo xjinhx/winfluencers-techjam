@@ -81,7 +81,6 @@
     "ask_max_confidence": 0.82,
     "ask_turn_budget": 8,
     "ask_min_info_gain": 0.05,
-    "recommend_on_ask_turns": true,
     "recommend_min_spans": 1,
     "recommend_max_wait": 4,
     "attribute_prior": {
@@ -98,6 +97,7 @@
     },
     "attribute_prior_floor": 0.05,
     "repeat_ask_decay": 0.45,
+    "disclosed_ask_decay": 0.0,
     "min_recommend_confidence": 0.054,
     "recommend_turn_fallback": 3
   },

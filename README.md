@@ -24,7 +24,10 @@ edited — rather than copied forward from an earlier draft.
 
 Per-scenario, same run:
 
-| scenario | n | HR@10 | MRR | MTTC |
+**Read this as in-sample, and read the two gates that got it there separately —
+they were built independently and neither one predicts the other's contribution:**
+
+| config | full 200 | HR@10 | MRR | MTTC |
 |---|---|---|---|---|
 | buying | 80 | 1.000 | 0.9056 | 1.825 |
 | browsing | 80 | 1.000 | 0.9110 | 2.388 |

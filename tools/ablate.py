@@ -93,6 +93,48 @@ def _with_mmr(config: Config) -> Config:
     return config
 
 
+def _no_recommend_hold(config: Config) -> Config:
+    """Both recommendation-hold gates off -- answer on every turn.
+
+    Inert under the dataclass defaults, so this row only says anything when
+    ablating a tuned config that actually sets them.
+    """
+    config.dialogue.recommend_min_spans = 0
+    config.dialogue.min_recommend_confidence = 0.0
+    return config
+
+
+def _no_span_conjunction(config: Config) -> Config:
+    """`span_all` -- does the candidate match EVERY disclosed span, not some.
+
+    Note this only removes the *feature*. The conjunctive candidate injection
+    that puts such products in the pool is unconditional in `agent.py` with no
+    config flag (deliberate, see CLAUDE.md), so it cannot be ablated from here.
+    """
+    config.ranking.w_span_all = 0.0
+    config.ranking.w_span_coverage = 0.0
+    return config
+
+
+def _no_commonness_penalty(config: Config) -> Config:
+    """Constraint-span terms stop being damped by catalog commonness."""
+    config.retrieval.constraint_commonness_penalty = 0.0
+    return config
+
+
+def _no_low_coverage_penalties(config: Config) -> Config:
+    """Title/popularity confidence unbacked by query coverage stops being cut."""
+    config.ranking.w_title_low_coverage = 0.0
+    config.ranking.w_popularity_low_coverage = 0.0
+    return config
+
+
+def _reask_disclosed(config: Config) -> Config:
+    """Restore asking about attributes the customer already disclosed."""
+    config.dialogue.disclosed_ask_decay = 1.0
+    return config
+
+
 ABLATIONS = [
     ("full system", None),
     ("- dense route (Route B)", _no_dense),
@@ -105,6 +147,13 @@ ABLATIONS = [
     ("- per-field weighting", _single_field_lexical),
     ("candidate depth 200 -> 20", _shallow_candidates),
     ("+ MMR diversity (browsing)", _with_mmr),
+    # Rows below are inert under the dataclass defaults and only measure
+    # anything when --config points at a tuned configuration that sets them.
+    ("- recommendation hold (both gates)", _no_recommend_hold),
+    ("- span conjunction (span_all)", _no_span_conjunction),
+    ("- constraint commonness penalty", _no_commonness_penalty),
+    ("- low-coverage penalties", _no_low_coverage_penalties),
+    ("+ re-ask disclosed attributes", _reask_disclosed),
 ]
 
 
@@ -113,16 +162,28 @@ def main() -> None:
     parser.add_argument("--subset", type=int, default=None)
     parser.add_argument("--output", default="docs/ablations.json")
     parser.add_argument("--markdown", default="docs/ablations.md")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Base config to ablate FROM. Default: the dataclass defaults, which "
+            "is what the historic 0.7641 table was measured against. Pass "
+            "config/tuned.json to ablate the shipped build instead -- several "
+            "rows are inert against the defaults and only measure something "
+            "there."
+        ),
+    )
     args = parser.parse_args()
 
     bench = Bench()
     samples = bench.subset(args.subset)
-    print(f"ablating over {len(samples)} sessions\n")
+    base = Config.load(args.config) if args.config else Config()
+    print(f"ablating over {len(samples)} sessions from {args.config or 'dataclass defaults'}\n")
 
     rows = []
     baseline_score = None
     for name, mutate in ABLATIONS:
-        config = Config()
+        config = copy.deepcopy(base)
         if mutate is not None:
             config = mutate(config)
         result = summarise(bench.score(copy.deepcopy(config), samples))
