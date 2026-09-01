@@ -121,7 +121,7 @@ Tuned weights load automatically from `config/tuned.json`. Delete or rename
 it to run with untuned defaults instead.
 
 ```bash
-python -m unittest discover -s tests      # 56 unit tests
+python -m unittest discover -s tests      # 60 unit tests
 python -m tools.demo --sample public_0002 # one full multi-turn transcript
 python -m tools.ablate                    # regenerate the ablation table
 python -m tools.tune                      # coordinate ascent, split-half CV
@@ -147,7 +147,7 @@ shopping_copilot/
   agent.py                      Turn orchestration, conjunctive injection, recommend gates
   baselines/weak_bm25.py        The original starter baseline, kept for comparison
 tools/                          tune, ablate, demo, diagnostics, offline replay
-tests/                          56 unit tests
+tests/                          60 unit tests
 config/tuned.json               Live tuned weights (loaded by default)
 evaluator/                      Official local evaluator (unmodified — never edit)
 data/                           catalog.jsonl (downloaded), public_set.jsonl (committed)
