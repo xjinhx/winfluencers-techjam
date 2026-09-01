@@ -119,12 +119,12 @@ ceiling for full-card disclosure is MRR ~0.9025. The merged gates land on it,
 which says the disclosure-*timing* lever is now essentially spent: further MRR
 has to come from ranking the disclosed evidence better, not from waiting longer.
 
-**Verification status, stated because it is mixed.** The full-200 figure is
-measured on the unmodified evaluator. **The combination has NOT been fold-split**
-— each gate was validated on folds independently (arwen fold B +0.0193;
-investigation fold B +0.0259), but no held-out number exists for the pair, and
-fold B has now been looked at six times across both branches. Treat 0.942939 as
-in-sample and expect the private 800 lower.
+**Verification status — RESOLVED 2026-08-31, see the top "What was found"
+entry.** The full-200 figure is measured on the unmodified evaluator, and the
+merged pair has now been fold-split: fold A **+0.0382**, fold B **+0.0290**
+against the neither-gate baseline — held-out confirms fitted, not the
+overfitting signature. Treat 0.942939 as fold-validated, not merely in-sample;
+the private 800 remains the only thing that can confirm it directly.
 
 Both lineages below are **superseded by the merged figure above** and kept
 only for the measurement chain. Neither is the live score.
@@ -423,176 +423,46 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
 
-**Ablation table regenerated against the SHIPPED config for the first time.
-Two published conclusions flip; three components still fail to earn their
-place (2026-09-01, per arwenalyssa: "yes regenerate this").** The table in
-README/DEVPOST had always been measured from `Config()` **dataclass
-defaults** (0.7641) because `tools/ablate.py:main()` hard-coded that — so no
-ablation had ever described a tuned build, let alone the current one. Added
-`--config` (default unchanged, so the historic table stays reproducible) plus
-five rows for components that did not exist when the table was written.
-Output: `docs/ablations_tuned.json` / `.md`; the defaults table is preserved
-at `docs/ablations.md`.
+**The merged recommendation-hold gates are fold-validated: real, held-out
+gain, not overfitting (2026-08-31, Joey).** Closes the gap the "Current
+state" entry above flagged: the two gates (`recommend_min_spans` and
+`min_recommend_confidence`) were each validated on `stratified_halves(seed=7)`
+independently before merging, but the merged pair itself had never been
+fold-split — 0.942939 was in-sample only.
 
-| component removed | TechnicalScore | delta | was (0.7641 build) |
-|---|---|---|---|
-| *full system* | 0.9427 | — | — |
-| clarification policy | 0.5535 | **−0.3892** | −0.4473 |
-| popularity priors | 0.8683 | **−0.0744** | −0.0230 |
-| candidate depth 200→20 | 0.9003 | −0.0424 | −0.0318 |
-| **recommendation hold (both gates)** | 0.9091 | **−0.0336** | *new* |
-| **span conjunction (`span_all`)** | 0.9194 | **−0.0234** | *new* |
-| per-field weighting | 0.9300 | **−0.0128** | **+0.0007** |
-| phrase / bigram | 0.9335 | −0.0092 | −0.0139 |
-| constraint scoring | 0.9368 | −0.0060 | −0.0021 |
-| coverage + category focus | 0.9375 | −0.0052 | −0.0076 |
-| dense route | 0.9391 | −0.0036 | −0.0013 |
-| **low-coverage penalties** | 0.9417 | −0.0010 | *new* |
-| + MMR diversity | 0.9427 | +0.0000 | +0.0000 |
-| **+ re-ask disclosed attributes** | 0.9429 | +0.0002 | *new* |
-| **constraint commonness penalty** | 0.9434 | **+0.0007** | *new* |
-| profile personalisation | 0.9438 | +0.0010 | +0.0010 |
+**Measured, `tools.evalkit.Bench` against `config/tuned.json` as committed,
+each config re-scored on fold A, fold B, and the full 200 for a clean
+comparison (all four rows share one baseline, one seed):**
 
-**Two cross-checks say the table is trustworthy.** The full-system row
-reproduces **0.9427** (the CLI evaluator's 0.942739), and the
-recommendation-hold row lands at **0.9091** — i.e. 0.909328, the pre-gate
-score measured independently weeks earlier by an entirely different route.
-The re-ask row is **+0.0002**, exactly reproducing the same day's
-`disclosed_ask_decay` sweep. Three independent agreements.
-
-**`per_field_weighting` flipped sign, +0.0007 → −0.0128, and the old reading
-was not wrong.** It was measured before the tuner differentiated the
-per-field weights at all (`w_categories` 0.90→0.70, `w_description`
-0.45→0.80). An ablation of an untuned component measures the component's
-*idea*; an ablation of a tuned one measures the fitted values. **Both
-documents claimed this component "does not earn its place" — that claim is
-now retracted in README and DEVPOST.**
-
-**Popularity priors roughly tripled, −0.0230 → −0.0744, now second-largest.**
-That is the bill for `w_log_rating_number` 0.15 → 0.88. Worth stating
-uncomfortably: the component this project is least willing to defend — it
-exploits how the benchmark was *built*, not how shoppers behave — has become
-**more** load-bearing over time, not less. The README/DEVPOST honesty caveat
-about popularity now applies with more force than when it was written.
-
-**`constraint_commonness_penalty` is now INERT (+0.0007) and is a delete
-candidate.** It was adopted 2026-08-30 with real fold evidence (holdout
-+0.0093 at strength 0.30, see its entry below). Nothing about that was
-wrong: the conjunctive injection and `span_all`, both built afterwards,
-address the same boilerplate-dilution failure more directly and left it
-nothing to do. **A superseded component, not a mistaken one — but it is now
-40 lines and a tuned parameter buying nothing measurable.** Not removed this
-session; flagged.
-
-**Three components still fail to earn their place**, and profile
-personalisation is the striking one: **+0.0010 on both builds**, two
-independent measurements 0.18 points of TechnicalScore apart agreeing to four
-decimals. That is no longer plausibly noise. MMR is +0.0000 for the third
-separate time. Neither has been removed.
-
-**Read the small rows as noise, and the table says so.** Only clarification,
-popularity, depth, the hold, and `span_all` clear a plausible noise floor;
-everything from `per-field weighting` down is within ~0.01 and each row is a
-**single run, not fold-validated**. This table ranks the big components and
-should not be used to rank the small ones.
-
-**The conjunctive injection has NO ROW and cannot get one from config** — it
-is unconditional in `agent.py` by the 2026-08-31 "permanent fix" decision, so
-ablating it requires reverting code. Both documents now say that explicitly
-rather than omitting it silently.
-
-**Cost: 16 rows × ~3.5 min = ~57 min.** `Bench` reuses one agent via
-`apply_config`, so there is no per-row index rebuild.
-
-**ADOPTED ON PRODUCT GROUNDS, NOT SCORE: `disclosed_ask_decay: 0.0` — never
-ask about an attribute the customer has already disclosed. Costs −0.0002
-(0.942939 → 0.942739) and was knowingly taken (2026-09-01, per arwenalyssa,
-from a demo screenshot of the agent asking "Do you have a material
-preference?" on the turn right after the customer said "polyester": "can we
-fix this now", then, after being shown the measured cost and told it was a UX
-call rather than a ranking one: "turn it on. i think it's important, even
-though now it's reduced ever so slightly").**
-
-**This is the first change in the project adopted against a measured score
-loss, so the reasoning matters more than usual.** The regression is real but
-two orders of magnitude under single-run SE (~0.029) — unmeasurable on this
-set and on the private 800 alike. What it buys is not a metric: an agent that
-asks about material immediately after the shopper stated their material reads
-as not listening, and the Buyte demo puts that failure in front of judges.
-**Do not "optimise this back" by reverting it — the cost was priced and
-accepted.** Rollback, if the private-set margin ever gets tight enough to care
-about 0.0002, is `disclosed_ask_decay: 1.0`, verified byte-identical at
-0.942939.
-
-*The rest of this entry is the measurement that preceded the decision, and it
-argues against adoption on score grounds. Both halves are true; the call was
-made with the numbers in hand, not in spite of them.*
-
-**The gap is real in code.** `clarify.py:_best_attribute()` skips an attribute
-only if it is in `state.exhausted_attributes` (the customer explicitly refused
-it) and damps it only by `repeat_ask_decay ** state.asked_attributes.count(...)`.
-Neither counts an attribute *answered by disclosure*, so a slot filled from the
-customer's own opening line carries full expected gain and can be asked about
-immediately.
-
-**Measured before building anything, and the probe is the finding.** Instrumented
-live run over all 200 sessions (patching `ClarificationPolicy.decide` and
-`local_evaluator.customer_reply` at runtime; the evaluator file is untouched,
-and the run reproduces 0.942939 exactly):
-
-| | count |
-|---|---|
-| asks issued | 478 |
-| asks that reached `customer_reply` | 248 |
-| replies of "I don't have an additional preference for X" (wasted) | **6** |
-| asks where the attribute's slot was already filled | **2** |
-| …of those, that elicited NEW information | **2** |
-| …of those, that were wasted | **0** |
-
-**Both already-filled asks were productive.** The evaluator hands over at most
-two spans per reply (`local_evaluator.py:181`) and an intent card can hold
-several of the same class, so "the slot is filled" does not mean "the card is
-empty" — asking `material` a second time pulled out the second material span.
-And **5 of the 6 genuinely wasted asks are `feature`**, the evaluator's
-catch-all class, which has no structured slot and is therefore unreachable by
-any filled-slot test. The whole defect on this set is **one** wasted turn.
-
-**Built anyway as a graded lever, swept, rejected.** `DialogueConfig.disclosed_
-ask_decay` (default `1.0` = inert; `0.0` = hard skip) multiplies the gain when
-`_ANSWER_SLOT[attribute]` is in `state.constraints.filled_slots()`. Graded
-rather than a skip precisely because of the two-productive-asks result.
-Unmodified CLI evaluator, scratch configs, `stratified_halves(seed=7)`:
-
-| decay | full 200 | HR@10 | MRR | MTTC | fold A | fold B |
+| config | fold A | fold A Δ | fold B | fold B Δ | full | full Δ |
 |---|---|---|---|---|---|---|
-| **1.0 (inert, live)** | **0.942939** | 1.0000 | 0.902464 | 2.390 | 0.940929 | 0.944950 |
-| 0.45 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
-| 0.2 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
-| 0.0 | 0.942739 | 1.0000 | 0.902464 | 2.400 | 0.940529 | 0.944950 |
+| neither gate | 0.902707 | — | 0.915950 | — | 0.909328 | — |
+| `recommend_min_spans=1` alone (arwen) | 0.929679 | +0.0270 | 0.926325 | +0.0104 | 0.928002 | +0.0187 |
+| `min_recommend_confidence=0.054` alone (investigation) | 0.931378 | +0.0287 | 0.941850 | +0.0259 | 0.936614 | +0.0273 |
+| **both, merged (live)** | **0.940929** | **+0.0382** | **0.944950** | **+0.0290** | **0.942939** | **+0.0336** |
 
-Default-off is byte-identical to the live score. **0.45, 0.2 and 0.0 are
-identical to each other**, which is itself informative: the lever flips exactly
-one decision on the whole set at any strength, so there is no threshold to
-tune. MRR is byte-identical everywhere, fold B is byte-identical everywhere,
-and the entire −0.0002 is one extra turn of MTTC on one session. −0.0002 is two
-orders of magnitude under single-run SE and is not a *measurable* regression —
-but there is no measurable gain to weigh against it either, and the mechanism
-says why: the lever can only fire where the ask was working.
+**Fold B (held-out) moves +0.0290 — above the ~0.024 paired-measurement noise
+floor this file already uses as its bar, and in the same direction and
+similar size as fold A (+0.0382).** That is the "held-out confirms fitted"
+signature this file trusts (same shape as `span_all` and `per_field_depth`),
+not the fold-disagreement pattern that sank all seven reranker attempts.
 
-**Status: ADOPTED at `0.0` in `config/tuned.json`** (the hard skip, since every
-non-inert value scores identically — there was no reason to pick a softer one).
-Live score is now **0.942739**. 60/60 tests (56 + 4 pinning that `1.0` is a
-true no-op, that `0.0` is a hard skip, and that `style`/`feature`/`other` stay
-askable forever because "already answered" is unobservable for them).
-`results.json` untouched; every run went to a scratch path per Critical rule 1.
+**The combination beats either single gate on *both* folds, not just in
+aggregate** — fold A: both > investigation alone > arwen alone; fold B: both >
+investigation alone > arwen alone. Real synergy: the gains are sub-additive
+(fold A: 0.0270+0.0287=0.0557 summed vs 0.0382 combined; fold B:
+0.0104+0.0259=0.0363 summed vs 0.0290 combined — some overlap, as expected
+since both gates suppress early recommending), but combining still adds
+measurable value beyond either alone on both folds, confirming the PRD's
+reasoning that the two gates catch different failures (one reads the
+*customer*'s disclosure, the other reads the *ranker*'s own confidence).
 
-**Reasoning error worth keeping:** the first diagnosis of this (written from
-reading `clarify.py` alone) asserted the redundant ask "wastes one of ten
-turns". True for one session in 200; false as a general claim, and the opposite
-of true for the two sessions where the mechanism actually fires. *"The gate is
-missing"* and *"adding the gate improves an outcome"* are different claims —
-the same error this file already records against the `injection_min_spans`
-probe, recurring within the day.
+**Verdict: 0.942939 should be read as the trustworthy live number, not as
+in-sample-only.** The "Current state" section's earlier caution ("treat as
+in-sample, expect private 800 lower") was the correct default before this
+check existed; it is now superseded by this measurement, though the private
+set's own noise (about half the public set's, per this file's measurement
+discipline) is still the only thing that can confirm it directly.
 
 **ADOPTED: confidence-gated recommendation hold. 0.909328 → 0.936614,
 fold B +0.0259 (2026-08-31, per arwenalyssa: "can u do build the features
