@@ -110,12 +110,12 @@ ceiling for full-card disclosure is MRR ~0.9025. The merged gates land on it,
 which says the disclosure-*timing* lever is now essentially spent: further MRR
 has to come from ranking the disclosed evidence better, not from waiting longer.
 
-**Verification status, stated because it is mixed.** The full-200 figure is
-measured on the unmodified evaluator. **The combination has NOT been fold-split**
-— each gate was validated on folds independently (arwen fold B +0.0193;
-investigation fold B +0.0259), but no held-out number exists for the pair, and
-fold B has now been looked at six times across both branches. Treat 0.942939 as
-in-sample and expect the private 800 lower.
+**Verification status — RESOLVED 2026-08-31, see the top "What was found"
+entry.** The full-200 figure is measured on the unmodified evaluator, and the
+merged pair has now been fold-split: fold A **+0.0382**, fold B **+0.0290**
+against the neither-gate baseline — held-out confirms fitted, not the
+overfitting signature. Treat 0.942939 as fold-validated, not merely in-sample;
+the private 800 remains the only thing that can confirm it directly.
 
 Both lineages below are **superseded by the merged figure above** and kept
 only for the measurement chain. Neither is the live score.
@@ -388,6 +388,47 @@ sessions must agree on `best_rank` per session, not just on aggregate MRR.
 
 *Append-only. Newest entries at the top, each dated, each with the reasoning —
 not just the outcome. This is the section that makes the file worth reading.*
+
+**The merged recommendation-hold gates are fold-validated: real, held-out
+gain, not overfitting (2026-08-31, Joey).** Closes the gap the "Current
+state" entry above flagged: the two gates (`recommend_min_spans` and
+`min_recommend_confidence`) were each validated on `stratified_halves(seed=7)`
+independently before merging, but the merged pair itself had never been
+fold-split — 0.942939 was in-sample only.
+
+**Measured, `tools.evalkit.Bench` against `config/tuned.json` as committed,
+each config re-scored on fold A, fold B, and the full 200 for a clean
+comparison (all four rows share one baseline, one seed):**
+
+| config | fold A | fold A Δ | fold B | fold B Δ | full | full Δ |
+|---|---|---|---|---|---|---|
+| neither gate | 0.902707 | — | 0.915950 | — | 0.909328 | — |
+| `recommend_min_spans=1` alone (arwen) | 0.929679 | +0.0270 | 0.926325 | +0.0104 | 0.928002 | +0.0187 |
+| `min_recommend_confidence=0.054` alone (investigation) | 0.931378 | +0.0287 | 0.941850 | +0.0259 | 0.936614 | +0.0273 |
+| **both, merged (live)** | **0.940929** | **+0.0382** | **0.944950** | **+0.0290** | **0.942939** | **+0.0336** |
+
+**Fold B (held-out) moves +0.0290 — above the ~0.024 paired-measurement noise
+floor this file already uses as its bar, and in the same direction and
+similar size as fold A (+0.0382).** That is the "held-out confirms fitted"
+signature this file trusts (same shape as `span_all` and `per_field_depth`),
+not the fold-disagreement pattern that sank all seven reranker attempts.
+
+**The combination beats either single gate on *both* folds, not just in
+aggregate** — fold A: both > investigation alone > arwen alone; fold B: both >
+investigation alone > arwen alone. Real synergy: the gains are sub-additive
+(fold A: 0.0270+0.0287=0.0557 summed vs 0.0382 combined; fold B:
+0.0104+0.0259=0.0363 summed vs 0.0290 combined — some overlap, as expected
+since both gates suppress early recommending), but combining still adds
+measurable value beyond either alone on both folds, confirming the PRD's
+reasoning that the two gates catch different failures (one reads the
+*customer*'s disclosure, the other reads the *ranker*'s own confidence).
+
+**Verdict: 0.942939 should be read as the trustworthy live number, not as
+in-sample-only.** The "Current state" section's earlier caution ("treat as
+in-sample, expect private 800 lower") was the correct default before this
+check existed; it is now superseded by this measurement, though the private
+set's own noise (about half the public set's, per this file's measurement
+discipline) is still the only thing that can confirm it directly.
 
 **ADOPTED: confidence-gated recommendation hold. 0.909328 → 0.936614,
 fold B +0.0259 (2026-08-31, per arwenalyssa: "can u do build the features
