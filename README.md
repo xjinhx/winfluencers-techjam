@@ -127,6 +127,11 @@ python -m tools.ablate                    # regenerate the ablation table
 python -m tools.tune                      # coordinate ascent, split-half CV
 ```
 
+**Never let `tools.tune` or the evaluator write to `config/tuned.json` or
+`results.json` while experimenting** — both default to the live submission
+paths. Always redirect `--output`/`--report`, or set `SHOPPING_COPILOT_CONFIG`
+to a scratch file. See `CLAUDE.md` Critical rules 1–2 for the full reasoning.
+
 ### Repository layout
 
 ```

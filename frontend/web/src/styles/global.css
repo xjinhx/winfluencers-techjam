@@ -1,0 +1,61 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #050506;
+  color: var(--color-text-on-dark-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  height: 100%;
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+img {
+  display: block;
+}
+
+/* Fullscreen at every width, full stop -- the app fills the viewport, no
+   floating mockup, no frame chrome, no capped column. The compact
+   "phone-ish" sizing (bubble widths, single-column recommendations) is
+   scoped to the phone breakpoint inside each component's own stylesheet;
+   above it, that content stretches to use the wider screen instead of
+   sitting in a narrow column with empty space on either side. */
+.app-shell {
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+}
+
+.phone-frame {
+  width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  background: var(--color-bg-shell-dark);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

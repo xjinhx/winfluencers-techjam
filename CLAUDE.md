@@ -84,10 +84,19 @@ no build step, no external dependencies (see Critical rule 5).
 
 ## Current state
 
-**Live score: `TechnicalScore = 0.942939`, HR@10 = 1.000, MRR 0.902464,
-MTTC 2.390 — measured 2026-08-31 on the `arwen` + `investigation` merge with
-the unmodified CLI evaluator over all 200 public sessions.** 168 of 200 at
-rank 1, zero misses, 56/56 tests.
+**Live score: `TechnicalScore = 0.942739`, HR@10 = 1.000, MRR 0.902464,
+MTTC 2.400 — measured 2026-09-01 with the unmodified CLI evaluator over all
+200 public sessions.** Zero misses, 60/60 tests.
+
+**This is 0.942939 minus 0.0002, deliberately.** `disclosed_ask_decay: 0.0`
+was adopted on product grounds against a known, measured score loss — see the
+top "What was found" entry before treating this as a regression to chase.
+MRR is byte-identical to the 0.942939 build; the entire delta is one extra
+turn of MTTC on one session.
+
+*The 0.942939 lineage below is the same build with `disclosed_ask_decay: 1.0`,
+which reproduces it byte-identically and is the documented rollback.* Measured
+2026-08-31 on the `arwen` + `investigation` merge: 168 of 200 at rank 1.
 
 **The two recommendation-hold gates were built in parallel and compound.**
 They read different signals and neither supersedes the other, so
@@ -213,13 +222,38 @@ coincidence: those sessions cannot register a hit before their override turn
 never bind for them. If a future threshold change moves this row, the gate
 is firing somewhere it should not.
 
-**Rank distribution, superseded by the gate — recompute before quoting.**
-The pre-gate distribution was 125 rank 1 / 31 rank 2 / 35 ranks 3-5 / 9
-ranks 6-10. The gate moved **39 sessions up and 1 down, losing none**, so
-those counts no longer describe the live build; the gated run's
-per-session `best_rank`s are in `c:/tmp/out_conf_gate.json` (scratch,
-regenerable) rather than restated here, because this file has twice carried
-a distribution that a later change silently invalidated. With HR@10
+**Rank distribution, MEASURED on the live build (2026-09-01), replacing the
+"recompute before quoting" placeholder this section used to carry:**
+
+| rank | sessions |
+|---|---|
+| 1 | **168** |
+| 2 | 18 |
+| 3-5 | 12 |
+| 6-10 | 2 |
+| miss | **0** |
+
+**Per scenario, also the live merged config** — this replaces the
+single-gate table above, which was the best available until now:
+
+| scenario | n | HR@10 | MRR | MTTC |
+|---|---|---|---|---|
+| buying | 80 | 1.0000 | 0.905625 | 1.825 |
+| browsing | 80 | 1.0000 | 0.910952 | 2.400 |
+| intent_override | 30 | 1.0000 | 0.880556 | 3.733 |
+| boundary | 10 | 1.0000 | 0.875000 | 3.000 |
+
+**Browsing is no longer the weakest scenario — it is now the strongest on
+MRR** (0.9110 against buying's 0.9056), which reverses a claim this file has
+carried since the beginning and which the Roadmap still repeats. The
+recommendation-hold gates did that: browsing openers disclose nothing, so
+they were exactly the sessions locking in a bad rank on turn 1. `boundary`
+(n=10) and `intent_override` are now the weak rows, and both are structural —
+override sessions cannot register a hit before turn 3-4 by construction.
+
+*The pre-gate distribution, for the chain: 125 rank 1 / 31 rank 2 / 35 ranks
+3-5 / 9 ranks 6-10. The confidence gate moved 39 sessions up and 1 down,
+losing none.* With HR@10
 saturated at 1.000, remaining headroom is still MRR plus efficiency, but
 efficiency is now the *spent* term rather than the free one — see the gate
 entry in "What was found" for the ceiling this leaves.
@@ -373,7 +407,7 @@ python -m tools.why_lost --trace c:\tmp\features.jsonl --ranks 3,4,5 --top 30
 python -m tools.tune --output c:\tmp\cfg.json --report c:\tmp\tuning_report.json
 
 # tests
-python -m unittest discover -s tests    # 38 tests (35 copilot + 3 evaluator)
+python -m unittest discover -s tests    # 60 tests
 ```
 
 **Tracing:** set `trace_path` in the config to emit `features.jsonl` (~115k
@@ -820,6 +854,11 @@ customer who discloses nothing is not met with silence forever. (4)
 confidence gate is **unusable as scaled** — NQC is `std(top-10)/|top|`, sits far
 below 0.2 in practice, and gating at 0.20 collapsed the agent to HR 0.010. The
 same scale bug is likely latent in `ask_max_confidence = 0.82`.
+**Update 2026-08-31: `recommend_min_confidence` has been deleted** — the
+`investigation` merge brought a correctly-scaled, turn-capped NQC threshold
+(`min_recommend_confidence`) with a near-identical name, and two dials on one
+statistic is a trap. This caveat's diagnosis was right and is what justified
+removing it; see the cleanup entry at the top.
 
 **Synthetic span normalisation: +0.00075 alone, +0.010 on the ceiling
 (2026-08-31).** Named for the cause, not the colour: `intent_card` does not
